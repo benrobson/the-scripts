@@ -1,9 +1,7 @@
+@REM 
 @REM Application Setup.bat
-@REM
-@REM Features:
-@REM * Install TeamViewer (for Remote Support)
-@REM * Install Adobe Reader
-@REM * Install Google Chrome
+@REM 
+@REM =========================
 
 @echo off
 @REM Set title of window
