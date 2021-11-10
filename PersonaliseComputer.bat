@@ -1,18 +1,6 @@
 @REM 
 @REM Personalise Computer Script
 @REM ===============================
-@REM Features
-@REM * Hides Cortana Button.
-@REM * Hides Task View Button.
-@REM * Hides People Button.
-@REM * Removes News and Interests from Taskbar.
-@REM * Clear all Taskbar items.
-@REM * Adds This PC icon to Desktop.
-@REM
-@REM To-Do
-@REM * Removes all Start Menu Icons/Tiles.
-@REM * Add User's Files to Desktop.
-@REM ===============================
 @REM 
 
 @echo off
