@@ -15,7 +15,7 @@ ECHO.
 ECHO.
 
 ECHO ============================================
-ECHO =============== Categories =================
+ECHO ===============  Packages  =================
 ECHO ============================================
 ECHO 1. Application Setup
 ECHO 2. Personalise Computer
@@ -47,15 +47,16 @@ IF ERRORLEVEL 4 GOTO RestartPrintSpoolerService
 :ApplicationSetup
 CLS
 ECHO Downloading ApplicationSetup Package
-curl -LJO https://github.com/benrobson/the-scripts/raw/main/ApplicationSetup.bat
-GOTO End
+curl -LJO --create-dirs -O --output ~/Downloads/ https://github.com/benrobson/the-scripts/raw/main/ApplicationSetup.bat
+@REM curl -LJO https://github.com/benrobson/the-scripts/raw/main/ApplicationSetup.bat
+GOTO END
 
 @REM Personalise Computer
-:Shutdown
+:PersonaliseComputer
 CLS
 ECHO Downloading PersonaliseComputer Package
 curl -LJO https://github.com/benrobson/the-scripts/raw/main/PersonaliseComputer.bat
-GOTO End
+GOTO END
 
 @REM Computer Run Up Bundle
 :ComputerRunUpBundle
@@ -63,14 +64,14 @@ CLS
 ECHO Downloading ApplicationSetup and PersonaliseComputer Package
 curl -LJO https://github.com/benrobson/the-scripts/raw/main/ApplicationSetup.bat
 curl -LJO https://github.com/benrobson/the-scripts/raw/main/PersonaliseComputer.bat
-GOTO End
+GOTO END
 
 @REM Restart Print Spooler Service
 :RestartPrintSpoolerService
 CLS
 ECHO Downloading RestartPrintSpoolerService Package
 curl -LJO https://github.com/benrobson/the-scripts/raw/main/RestartPrintSpoolerService.bat
-GOTO End
+GOTO END
 
 :END
 COLOR A
