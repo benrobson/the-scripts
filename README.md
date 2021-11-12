@@ -3,7 +3,7 @@ A collection of Batch and PowerShell scripts used for various purposes.
 
 ## DownloadApplicationPackage.bat
 ### Function
-Downloads the PersonaliseComputer.bat and ApplicationSetup.bat packages together, easily used to auto-update, download and deploy easily.
+Lists all of the below packages that you can download individually or as a group/bundle together for efficiency (e.g. Download ApplicationSetup.bat and PersonaliseComputer.bat for running up a computer.)
 
 <hr>
 
@@ -33,3 +33,9 @@ A script used to automatically personalise a computer to deploy for clients.
 ### To Do
 * Removes all Start Menu Icons/Tiles.
 * Add User's Files to Desktop.
+
+<hr>
+
+## RestartPrintSpoolerService.bat
+### Function
+A script used to restart the Printer Spool Service if it gets stuck.
