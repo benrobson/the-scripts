@@ -54,9 +54,9 @@ echo ============================================
 @REM Download Chocolatey to download standard applications
 @"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command "iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))" && SET "PATH=%PATH%;%ALLUSERSPROFILE%\chocolatey\bin"
 
-choco install teamviewer -y
-choco install adobereader -y
-choco install googlechrome -y
+choco install teamviewer --file64 -y
+choco install adobereader --file64 -y
+choco install googlechrome --file64 -y
 
 goto :exit
 :exit
