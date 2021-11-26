@@ -54,15 +54,13 @@ echo ============================================
 @REM Download Chocolatey to download standard applications
 @"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command "iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))" && SET "PATH=%PATH%;%ALLUSERSPROFILE%\chocolatey\bin"
 
-choco install teamviewer -y
-choco install adobereader -y
-choco install googlechrome -y
+choco install teamviewer -y --x64
+@REM Install Adobe Reader x64 and drop program icon on Desktop.
+choco install adobereader -y -params '"/DesktopIcon"' --x64
+choco install googlechrome -y --x64
 
 goto :exit
 :exit
-powercfg.exe /h off
-powercfg.exe -change -standby-timeout-ac 0
-powercfg.exe -change -monitor-timeout-ac 60
 cls
 color a
 echo ============================================
