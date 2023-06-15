@@ -1,3 +1,9 @@
+# This script retrieves a list of users and contacts from Active Directory, including their distribution group memberships.
+# It combines user and contact objects, retrieves their properties, and filters for distribution groups.
+# The script creates a custom object for each user or contact, including their entry type, first name, last name, email address, and group memberships. 
+# The resulting information is displayed as a formatted table and exported to a CSV file. 
+# This script is useful for auditing and documenting user and contact information, particularly their distribution group memberships, in Active Directory.
+
 # Retrieves a list of users and contacts from Active Directory along with their distribution group memberships. 
 # It distinguishes between users and contacts, includes their first name, last name, email address, and indicates whether they are a user or a contact.
 

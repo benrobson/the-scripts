@@ -1,3 +1,9 @@
+# This script exports user information from an Active Directory domain, including the user's name, username, email address, status, and groups they belong to. 
+# It retrieves all user objects and iterates over them, collecting group membership details for each user. 
+# The script then creates custom objects for each user, adding the relevant properties, and appends them to an array. 
+# Finally, it sorts and displays the report on the screen and exports it to a CSV file. 
+# This script is useful for generating a comprehensive user report for analysis or documentation purposes.
+
 # Export the Users Name, Username, Email Address, Status, and Groups the user is in.
 
 $Report = @()

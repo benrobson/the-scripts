@@ -35,7 +35,7 @@ echo.
 ewfmgr.exe C: -disable
 
 set today=%date:~10,4%-%date:~7,2%-%date:~4,2%
-cls
+
 echo ============================================
 echo ====   Application Installation Script  ====
 echo ============================================
@@ -44,12 +44,14 @@ echo ============================================
 echo.
 echo.
 
-cls
+
 @REM Installing Standard Applications
 echo ============================================
 echo =======   Installing Standard Apps   =======
 echo =======        Please wait...        =======
 echo ============================================
+echo.
+echo.
 
 @REM Download Chocolatey to download standard applications
 @"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command "iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))" && SET "PATH=%PATH%;%ALLUSERSPROFILE%\chocolatey\bin"
@@ -61,7 +63,8 @@ choco install googlechrome -y --x64
 
 goto :exit
 :exit
-cls
+echo.
+echo.
 color a
 echo ============================================
 echo =======      Setup is complete.      =======

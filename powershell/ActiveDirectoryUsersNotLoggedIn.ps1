@@ -1,3 +1,8 @@
+# This script defines a function that retrieves user information from an Active Directory domain based on their login activity.
+# It filters and selects enabled users who haven't logged in over the past 90 days within a specified organizational unit. 
+# The resulting user information, including their username, name, and last login date, is sorted and exported to a CSV file. 
+# This function is useful for identifying inactive user accounts within a specific organizational unit.
+
 # Use -90 for who hasn’t logged in over the past 90 days
 # Use 90 for who has logged in over the past 90 days
 
