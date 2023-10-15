@@ -8,9 +8,32 @@ Function GenerateRandomNumber {
 
 # Define a list of words for password generation
 $wordList = @(
-    "apple", "banana", "cherry", "grape", "orange",
-    "lemon", "lime", "kiwi", "mango", "peach"
+    "computer", "school", "teacher", "student", "pen",
+    "pencil", "desk", "chair", "paper", "eraser",
+    "ruler", "math", "science", "art", "music",
+    "play", "friend", "happy", "sad", "fun",
+    "game", "park", "color", "red", "blue",
+    "green", "yellow", "purple", "orange", "pink",
+    "black", "white", "brown", "gray", "shoes",
+    "socks", "shirt", "pants", "hat", "jacket",
+    "sweater", "dress", "shorts", "skirt", "glasses",
+    "hat", "gloves", "scarf", "boots", "backpack",
+    "lunchbox", "bedroom", "kitchen", "bathroom", "livingroom",
+    "bed", "table", "chair", "sofa", "TV",
+    "computer", "phone", "door", "window", "floor",
+    "fruit", "vegetable", "pizza", "cake", "ice cream",
+    "candy", "cookie", "sandwich", "juice", "milk",
+    "water", "bread", "cheese", "chicken", "pasta",
+    "rice", "soup", "salad", "burger", "fries",
+    "pizza", "spaghetti", "pancake", "waffle", "grapes",
+    "melon", "strawberry", "carrot", "broccoli", "potato",
+    "tomato", "onion", "lettuce", "banana", "apple",
+    "orange", "pear", "peach", "grapefruit", "lemon",
+    "watermelon", "pineapple", "cherry", "blueberry", "raspberry",
+    "peas", "corn", "beans", "pumpkin", "cucumber"
 )
+
+
 
 # Function to generate a new password
 Function GenerateNewPassword {
