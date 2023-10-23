@@ -6,6 +6,9 @@ Function GenerateRandomNumber {
     return Get-Random -Minimum 10 -Maximum 100
 }
 
+# Define a global variable to store the password
+$global:password = GenerateNewPassword
+
 # Define a list of words for password generation
 $wordList = @(
     "computer", "school", "teacher", "student", "pen",
@@ -61,7 +64,7 @@ $form.FormBorderStyle = "FixedDialog" # Set form to not resizable
 $textbox = New-Object System.Windows.Forms.TextBox
 $textbox.Location = New-Object System.Drawing.Point(10,20)
 $textbox.Width = $form.ClientSize.Width - 20 # Adjust width of textbox to fit the form
-$textbox.Text = $password
+$textbox.Text = $global:password
 $textbox.ReadOnly = $true
 
 # Create Button to copy password to clipboard
@@ -71,7 +74,7 @@ $buttonCopy.Size = New-Object System.Drawing.Size(120,40)
 $buttonCopy.Text = "Copy to Clipboard"
 
 $buttonCopy.Add_Click({
-    [System.Windows.Forms.Clipboard]::SetText($password)
+    [System.Windows.Forms.Clipboard]::SetText($global:password)
     [System.Windows.Forms.MessageBox]::Show("Password copied to clipboard.", "Copy Successful", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
 })
 
@@ -82,8 +85,8 @@ $buttonNew.Size = New-Object System.Drawing.Size(120,40)
 $buttonNew.Text = "Generate New Password"
 
 $buttonNew.Add_Click({
-    $password = GenerateNewPassword
-    $textbox.Text = $password
+    $global:password = GenerateNewPassword
+    $textbox.Text = $global:password
 })
 
 # Add controls to form
@@ -92,6 +95,7 @@ $form.Controls.Add($buttonCopy)
 $form.Controls.Add($buttonNew)
 
 # Display the form
+$form.ShowDialog()
 $form.ShowDialog()
 
 Invoke-ps2exe .\Untitled1.ps1 .\GeneratePasswordGUI.exe
