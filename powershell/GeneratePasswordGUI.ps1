@@ -93,3 +93,5 @@ $form.Controls.Add($buttonNew)
 
 # Display the form
 $form.ShowDialog()
+
+Invoke-ps2exe .\Untitled1.ps1 .\GeneratePasswordGUI.exe
