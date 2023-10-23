@@ -6,9 +6,6 @@ Function GenerateRandomNumber {
     return Get-Random -Minimum 10 -Maximum 100
 }
 
-# Define a global variable to store the password
-$global:password = GenerateNewPassword
-
 # Define a list of words for password generation
 $wordList = @(
     "computer", "school", "teacher", "student", "pen",
@@ -50,8 +47,14 @@ Function GenerateNewPassword {
     return "$word1$number$symbol$word2"
 }
 
+# Define a global variable to store the password
+$global:password = GenerateNewPassword
+
 # Automatically generate initial password
 $password = GenerateNewPassword
+
+# Load the Windows Forms assembly
+Add-Type -AssemblyName System.Windows.Forms
 
 # Create Form
 $form = New-Object System.Windows.Forms.Form
@@ -98,4 +101,4 @@ $form.Controls.Add($buttonNew)
 $form.ShowDialog()
 $form.ShowDialog()
 
-Invoke-ps2exe .\Untitled1.ps1 .\GeneratePasswordGUI.exe
+Invoke-ps2exe .\GeneratePasswordGUI.ps1 .\GeneratePasswordGUI.exe -noConsole
