@@ -30,5 +30,5 @@ $usersData = $users | ForEach-Object {
 $usersData | Format-Table -Property FirstName, LastName, Email -AutoSize
 
 # Export the data to a CSV file
-$csvFilePath = "C:\TenantDataExport.csv"  # Replace with your desired file path
+$csvFilePath = "C:\Data\TenantDataExport.csv"  # Replace with your desired file path
 $usersData | Export-Csv -Path $csvFilePath -NoTypeInformation

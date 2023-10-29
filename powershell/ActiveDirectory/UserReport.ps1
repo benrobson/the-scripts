@@ -42,4 +42,4 @@ Foreach($User in $users) {
 
 # Output to screen as well as csv file.
 $Report | Sort-Object Name | FT -AutoSize
-$Report | Sort-Object Name | Export-Csv -Path 'C:\Temp\users.csv' -NoTypeInformation
+$Report | Sort-Object Name | Export-Csv -Path 'C:\Data\users.csv' -NoTypeInformation

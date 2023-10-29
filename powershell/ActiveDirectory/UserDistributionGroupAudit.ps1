@@ -47,4 +47,4 @@ foreach ($user in $allUsers) {
 
 $userMemberships | Format-Table -AutoSize
 
-$userMemberships | Export-Csv -Path "c:\CLIENTDistUsersAuditDDMMYYYY.csv" -NoTypeInformation
+$userMemberships | Export-Csv -Path "c:\Data\CLIENTDistUsersAuditDDMMYYYY.csv" -NoTypeInformation

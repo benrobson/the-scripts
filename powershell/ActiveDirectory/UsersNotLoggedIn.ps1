@@ -7,7 +7,7 @@
 # Use 90 for who has logged in over the past 90 days
 
 $OUpath = 'ou=CLIENTOUUSERS,dc=DOMAIN,dc=local'
-$ExportPath = 'c:\TEMP\CLIENTUsersDDMMYYYY.csv'
+$ExportPath = 'c:\Data\CLIENTUsersDDMMYYYY.csv'
 
 # Getting users who haven't logged in in over 90 days
 $Date = (Get-Date).AddDays(-90)

@@ -5,6 +5,6 @@
 # Finally, it exports the results to the specified CSV file. 
 # This script is useful for obtaining a list of security groups in the domain for various administrative purposes.
 
-$ExportPath = 'c:\TEMP\CLIENTSecGroupsDDMMYYYY.csv'
+$ExportPath = 'c:\Data\CLIENTSecGroupsDDMMYYYY.csv'
 
 Get-ADGroup -filter {groupCategory -eq 'Security'} | Select Name | Sort-Object Name | Export-Csv -NoType $ExportPath
