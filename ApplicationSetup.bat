@@ -59,7 +59,7 @@ echo.
 choco install teamviewer -y --x64
 @REM Install Adobe Reader x64 and drop program icon on Desktop.
 choco install adobereader -y -params '"/DesktopIcon"' --x64
-choco install googlechrome -y --x64
+choco install googlechrome -y --x64 --ignore-checksums
 
 goto :exit
 :exit
