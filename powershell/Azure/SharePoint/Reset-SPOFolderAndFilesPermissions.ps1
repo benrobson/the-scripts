@@ -62,12 +62,15 @@ Function Reset-SPOFolderAndFilesPermissions([Microsoft.SharePoint.Client.Folder]
 }
 
 # Variables
-$SiteURL = "https://company.sharepoint.com/sites/SITE"
+$SiteURL = "https://SITECORP.sharepoint.com/sites/SITENAME"
 $ListName = "Documents"
 $SleepTime = 1
 
 # Get Credentials to connect
-$Cred= Get-Credential
+$Username = "SITEADMIN@SITETENANT.onmicrosoft.com"
+$SecurePassword = ConvertTo-SecureString -String "APPPASSWORD" -AsPlainText -Force
+$Cred = New-Object System.Management.Automation.PSCredential($Username, $SecurePassword)
+
 
 # Setup the context
 $Ctx = New-Object Microsoft.SharePoint.Client.ClientContext($SiteURL)
@@ -83,3 +86,5 @@ $ProcessedItems = New-Object System.Collections.Generic.HashSet[String]
 
 # Call the function to reset permissions of all folders and files of the document library
 Reset-SPOFolderAndFilesPermissions $List.RootFolder $ProcessedItems
+
+pause
