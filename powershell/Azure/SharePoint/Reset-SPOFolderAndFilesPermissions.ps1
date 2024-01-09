@@ -4,6 +4,16 @@
 # Load SharePoint CSOM Assemblies
 Add-Type -Path "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI\Microsoft.SharePoint.Client.dll"
 Add-Type -Path "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI\Microsoft.SharePoint.Client.Runtime.dll"
+
+# Variables
+$SiteURL = "https://SITECORP.sharepoint.com/sites/AwconCivil"
+$ListName = "Documents"
+$SleepTime = 1
+
+# Get Credentials to connect
+$Username = "admin@SITECORP.onmicrosoft.com"
+$SecurePassword = ConvertTo-SecureString -String "APPPASSWORD" -AsPlainText -Force
+$Cred = New-Object System.Management.Automation.PSCredential($Username, $SecurePassword)
  
 # Function to Reset Permissions of all Sub-folders and Files in a Folder
 Function Reset-SPOFolderAndFilesPermissions([Microsoft.SharePoint.Client.Folder]$Folder, [System.Collections.Generic.HashSet[String]]$ProcessedItems)
@@ -32,9 +42,23 @@ Function Reset-SPOFolderAndFilesPermissions([Microsoft.SharePoint.Client.Folder]
             If($Item.ListItemAllFields.HasUniqueRoleAssignments -eq $True)
             {
                 # Reset Item Permissions
-                $Item.ListItemAllFields.ResetRoleInheritance()
-                $Ctx.ExecuteQuery()
-                Write-host -f Green "`tItem's Unique Permissions are Removed!"
+                Try {
+                    $Item.ListItemAllFields.ResetRoleInheritance()
+                    $Ctx.ExecuteQuery()
+                    Write-host -f Green "`tItem's Unique Permissions are Removed!"
+                }
+                Catch {
+                    # Check if the error is related to too many items in the folder
+                    if ($_.Exception.Message -like '*2160727*') {
+                        Write-host -f Yellow "Encountered error: $_.Exception.Message"
+                        Write-Host "Retrying in 5 seconds..."
+                        Start-Sleep -Seconds 5
+                        Reset-SPOFolderAndFilesPermissions $Folder $ProcessedItems
+                    }
+                    else {
+                        throw $_.Exception
+                    }
+                }
             }
 
             # Add item to the processed items set
@@ -60,17 +84,6 @@ Function Reset-SPOFolderAndFilesPermissions([Microsoft.SharePoint.Client.Folder]
         }
     }
 }
-
-# Variables
-$SiteURL = "https://SITECORP.sharepoint.com/sites/SITENAME"
-$ListName = "Documents"
-$SleepTime = 1
-
-# Get Credentials to connect
-$Username = "SITEADMIN@SITETENANT.onmicrosoft.com"
-$SecurePassword = ConvertTo-SecureString -String "APPPASSWORD" -AsPlainText -Force
-$Cred = New-Object System.Management.Automation.PSCredential($Username, $SecurePassword)
-
 
 # Setup the context
 $Ctx = New-Object Microsoft.SharePoint.Client.ClientContext($SiteURL)
