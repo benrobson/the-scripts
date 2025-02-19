@@ -40,6 +40,9 @@ Foreach($User in $users) {
     $Report += $Out
 }
 
-# Output to screen as well as csv file.
-$Report | Sort-Object Name | FT -AutoSize
-$Report | Sort-Object Name | Export-Csv -Path 'C:\Data\users.csv' -NoTypeInformation
+# Display results in a formatted table
+$Report | Sort-Object Name | Format-Table -AutoSize
+
+# Export results to CSV file with a timestamp
+$Timestamp = Get-Date -Format "yyyyMMdd"
+$Report | Sort-Object Name | Export-Csv -Path "C:\Data\UsersExport_$Timestamp.csv" -NoTypeInformation
