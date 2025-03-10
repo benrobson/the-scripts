@@ -11,14 +11,21 @@ The UNC path to scan. Example: "\\server\share"
 .PARAMETER outputDir
 The directory where the output file will be saved. Example: "C:\Data"
 
+.PARAMETER excludeFolders
+A comma-separated list of folder names to exclude from the scan. Example: "ExcludeFolder1,ExcludeFolder2"
+
 .EXAMPLE
-.\DirectoryAuditor.ps1 -uncPath "\\server\share" -outputDir "C:\Data"
+.\DirectoryAuditor.ps1 -uncPath "\\server\share" -outputDir "C:\Data" -excludeFolders "Temp,Backup"
 #>
 
 param (
     [string]$uncPath = "\\server\share",
-    [string]$outputDir = "C:\Data"
+    [string]$outputDir = "C:\Data",
+    [string]$excludeFolders = ""
 )
+
+# Convert the excludeFolders string to an array
+$excludeFoldersArray = $excludeFolders -split ',' | ForEach-Object { $_.Trim() }
 
 # Extract the server hostname from the UNC path
 $serverHostname = $uncPath -replace '^\\\\([^\\]+).*', '$1'
@@ -48,6 +55,13 @@ function Log-FoldersAndFiles {
         $items = Get-ChildItem -Path $path -ErrorAction Stop
 
         foreach ($item in $items) {
+            # Check if the item is a directory and if it should be excluded
+            if ($item.PSIsContainer -and ($excludeFoldersArray -contains $item.Name)) {
+                "Excluded Folder: $($item.FullName)" | Out-File -FilePath $outputPath -Append
+                Write-Host "Excluded Folder: $($item.FullName)"
+                continue
+            }
+
             # Output the full name of the item
             $item.FullName | Out-File -FilePath $outputPath -Append
 
