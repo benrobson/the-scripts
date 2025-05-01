@@ -1,37 +1,27 @@
-@REM 
-@REM Application Setup.bat
-@REM 
-@REM =========================
-
 @echo off
-@REM Set title of window
 title Application Installation Script
 goto checkPermissions
 
-@REM Check permissions that the user is currently running
 :checkPermissions
 echo Administrative permissions are required to run this script. Detecting permissions...
 
 net session >nul 2>&1
 if %errorLevel% == 0 (
-	color 9
+    color 9
     echo Success: Administrative permissions confirmed.
     goto AdminAccess
 ) else (
-   color CE
-   echo Failure: Current permissions are inadequate.
-   echo Please run as administrator and try again.
-   TIMEOUT 7
-   Exit
+    color CE
+    echo Failure: Current permissions are inadequate.
+    echo Please run as administrator and try again.
+    timeout 7
+    exit
 )
 
-pause >nul
-
 :AdminAccess
+echo.
 echo Success: Administrative permissions confirmed.
-echo.
-echo.
-
+echo Disabling EWF (if enabled)...
 ewfmgr.exe C: -disable
 
 set today=%date:~10,4%-%date:~7,2%-%date:~4,2%
@@ -42,32 +32,29 @@ echo ============================================
 echo =======     Created By: Ben Robson   =======
 echo ============================================
 echo.
-echo.
+echo Installing standard applications...
 
+:: Install Applications using Winget
+echo Installing TeamViewer...
+winget install --id=TeamViewer.TeamViewer --accept-source-agreements --accept-package-agreements
 
-@REM Installing Standard Applications
-echo ============================================
-echo =======   Installing Standard Apps   =======
-echo =======        Please wait...        =======
-echo ============================================
-echo.
-echo.
+echo Installing Adobe Acrobat Reader...
+winget install --id=Adobe.Acrobat.Reader.64-bit --accept-source-agreements --accept-package-agreements
 
-@REM Download Chocolatey to download standard applications
-@"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command "iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))" && SET "PATH=%PATH%;%ALLUSERSPROFILE%\chocolatey\bin"
+echo Installing Google Chrome...
+winget install --id=Google.Chrome --accept-source-agreements --accept-package-agreements
 
-choco install teamviewer -y --x64
-@REM Install Adobe Reader x64 and drop program icon on Desktop.
-choco install adobereader -y -params '"/DesktopIcon"' --x64
-choco install googlechrome -y --x64 --ignore-checksums
+:: Create Shortcut to https://reliableit.au/support
+echo Creating desktop shortcut to support page...
+powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('C:\Users\Public\Desktop\ReliableIT Support.lnk');$s.TargetPath='https://reliableit.au/support';$s.Save()"
 
-goto :exit
+goto exit
+
 :exit
-echo.
 echo.
 color a
 echo ============================================
 echo =======      Setup is complete.      =======
 echo ======= Please press any key to exit =======
 echo ============================================
-pause
+pause >nul
