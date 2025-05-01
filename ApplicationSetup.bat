@@ -22,14 +22,6 @@ if %errorLevel% == 0 (
 echo.
 echo Success: Administrative permissions confirmed.
 
-:: Disable Fast Startup without disabling hibernation
-echo Disabling Fast Startup...
-powercfg -h off
-
-:: Optional: Also disable EWF if needed
-echo Disabling EWF (if enabled)...
-ewfmgr.exe C: -disable
-
 set today=%date:~10,4%-%date:~7,2%-%date:~4,2%
 
 echo ============================================
