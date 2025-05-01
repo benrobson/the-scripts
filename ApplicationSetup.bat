@@ -21,6 +21,12 @@ if %errorLevel% == 0 (
 :AdminAccess
 echo.
 echo Success: Administrative permissions confirmed.
+
+:: Disable Fast Startup without disabling hibernation
+echo Disabling Fast Startup...
+powercfg -h off
+
+:: Optional: Also disable EWF if needed
 echo Disabling EWF (if enabled)...
 ewfmgr.exe C: -disable
 
@@ -44,9 +50,17 @@ winget install --id=Adobe.Acrobat.Reader.64-bit --accept-source-agreements --acc
 echo Installing Google Chrome...
 winget install --id=Google.Chrome --accept-source-agreements --accept-package-agreements
 
-:: Create Shortcut to https://reliableit.au/support
+echo Installing Microsoft 365 Apps for Business...
+winget install --id=Microsoft.Office --accept-source-agreements --accept-package-agreements
+
+:: Prepare icon directory
+echo Downloading support icon...
+mkdir "C:\ProgramData\ReliableIT" >nul 2>&1
+powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Reliable-IT/the-scripts/refs/heads/AppSetup-winget/Assets/favicon.ico' -OutFile 'C:\ProgramData\ReliableIT\support.ico' -UseBasicParsing"
+
+:: Create Shortcut to https://reliableit.au/support with custom icon
 echo Creating desktop shortcut to support page...
-powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('C:\Users\Public\Desktop\ReliableIT Support.lnk');$s.TargetPath='https://reliableit.au/support';$s.Save()"
+powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('C:\Users\Public\Desktop\ReliableIT Support.lnk');$s.TargetPath='https://reliableit.au/support';$s.IconLocation='C:\ProgramData\ReliableIT\support.ico';$s.Save()"
 
 goto exit
 
