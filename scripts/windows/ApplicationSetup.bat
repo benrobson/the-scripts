@@ -48,7 +48,7 @@ winget install --id=Microsoft.Office --accept-source-agreements --accept-package
 :: Prepare icon directory
 echo Downloading support icon...
 mkdir "C:\ProgramData\ReliableIT" >nul 2>&1
-powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Reliable-IT/the-scripts/refs/heads/master/Assets/favicon.ico' -OutFile 'C:\ProgramData\ReliableIT\support.ico' -UseBasicParsing"
+powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Reliable-IT/the-scripts/refs/heads/master/scripts/assets/favicon.ico' -OutFile 'C:\ProgramData\ReliableIT\support.ico' -UseBasicParsing"
 
 :: Create Shortcut to https://reliableit.au/support with custom icon
 echo Creating desktop shortcut to support page...
