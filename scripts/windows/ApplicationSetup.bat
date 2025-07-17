@@ -1,15 +1,15 @@
 @echo off
+setlocal
 title Application Installation Script
 goto checkPermissions
 
 :checkPermissions
 echo Administrative permissions are required to run this script. Detecting permissions...
-
 net session >nul 2>&1
 if %errorLevel% == 0 (
     color 9
     echo Success: Administrative permissions confirmed.
-    goto AdminAccess
+    goto checkWinget
 ) else (
     color CE
     echo Failure: Current permissions are inadequate.
@@ -18,12 +18,35 @@ if %errorLevel% == 0 (
     exit
 )
 
-:AdminAccess
+:checkWinget
+echo Checking for winget...
+winget --version >nul 2>&1
+if %errorLevel% == 0 (
+    echo Winget is already installed.
+    goto installApps
+) else (
+    echo Winget is not installed. Attempting to install...
+    goto installWinget
+)
+
+:installWinget
+echo Downloading winget...
+powershell -Command "Invoke-WebRequest -Uri 'https://github.com/microsoft/winget-cli/releases/download/v1.11.400/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile '%TEMP%\winget.msixbundle' -UseBasicParsing"
+echo Installing winget...
+powershell -Command "Add-AppxPackage -Path '%TEMP%\winget.msixbundle'"
+winget --version >nul 2>&1
+if %errorLevel% == 0 (
+    echo Winget installed successfully.
+    goto installApps
+) else (
+    color CE
+    echo Failed to install winget.
+    timeout 7
+    exit
+)
+
+:installApps
 echo.
-echo Success: Administrative permissions confirmed.
-
-set today=%date:~10,4%-%date:~7,2%-%date:~4,2%
-
 echo ============================================
 echo ====   Application Installation Script  ====
 echo ============================================
@@ -32,18 +55,10 @@ echo ============================================
 echo.
 echo Installing standard applications...
 
-:: Install Applications using Winget
-echo Installing TeamViewer...
-winget install --id=TeamViewer.TeamViewer --accept-source-agreements --accept-package-agreements
-
-echo Installing Adobe Acrobat Reader...
-winget install --id=Adobe.Acrobat.Reader.64-bit --accept-source-agreements --accept-package-agreements
-
-echo Installing Google Chrome...
-winget install --id=Google.Chrome --accept-source-agreements --accept-package-agreements
-
-echo Installing Microsoft 365 Apps for Business...
-winget install --id=Microsoft.Office --accept-source-agreements --accept-package-agreements
+call :installApp "TeamViewer" "TeamViewer.TeamViewer"
+call :installApp "Adobe Acrobat Reader" "Adobe.Acrobat.Reader.64-bit"
+call :installApp "Google Chrome" "Google.Chrome"
+call :installApp "Microsoft 365 Apps for Business" "Microsoft.Office"
 
 :: Prepare icon directory
 echo Downloading support icon...
@@ -56,6 +71,11 @@ powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('C:\Users
 
 goto exit
 
+:installApp
+echo Installing %~1...
+winget install --id=%~2 --accept-source-agreements --accept-package-agreements
+goto :eof
+
 :exit
 echo.
 color a
@@ -64,3 +84,4 @@ echo =======      Setup is complete.      =======
 echo ======= Please press any key to exit =======
 echo ============================================
 pause >nul
+endlocal
