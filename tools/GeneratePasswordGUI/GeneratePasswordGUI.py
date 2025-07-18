@@ -9,16 +9,20 @@ The user can copy the password to the clipboard or generate a new one.
 import tkinter as tk
 from tkinter import ttk, messagebox
 import random
+import subprocess
 
 class PasswordGenerator(tk.Tk):
     """
     Password Generator GUI application.
     """
+    __version__ = "0.1.0"
+
     def __init__(self):
         """
         Initializes the application.
         """
         super().__init__()
+        self.commit_hash = self.get_commit_hash()
         self.title("Password Generator")
         self.geometry("400x150")
         self.resizable(False, False)
@@ -90,6 +94,9 @@ class PasswordGenerator(tk.Tk):
         self.generate_button = ttk.Button(button_frame, text="Generate New Password", command=self.regenerate_password)
         self.generate_button.pack(side="right", expand=True, fill="x", padx=(5, 0))
 
+        version_label = ttk.Label(self, text=f"Version: {self.__version__} ({self.commit_hash})", anchor="w")
+        version_label.pack(side="bottom", fill="x", padx=10, pady=5)
+
     def copy_to_clipboard(self):
         """
         Copies the current password to the clipboard.
@@ -104,6 +111,16 @@ class PasswordGenerator(tk.Tk):
         """
         self.password = self.generate_password()
         self.password_var.set(self.password)
+
+    def get_commit_hash(self):
+        """
+        Gets the current git commit hash.
+        """
+        try:
+            commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('utf-8').strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            commit_hash = "N/A"
+        return commit_hash
 
 if __name__ == "__main__":
     app = PasswordGenerator()
