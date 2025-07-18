@@ -61,13 +61,33 @@ echo ============================================
 echo =======     Created By: Ben Robson   =======
 echo ============================================
 echo.
-echo Installing standard applications...
+echo What would you like to do?
+echo.
+echo 1. Install standard applications
+echo 2. Check for updates
+echo.
+set /p choice="Enter your choice: "
+if /i "%choice%"=="1" goto installStandardApps
+if /i "%choice%"=="2" goto checkUpdates
+goto exit
 
+:installStandardApps
+echo Installing standard applications...
 call :installApp "TeamViewer" "TeamViewer.TeamViewer"
 call :installApp "Adobe Acrobat Reader" "Adobe.Acrobat.Reader.64-bit"
 call :installApp "Google Chrome" "Google.Chrome"
 call :installApp "Microsoft 365 Apps for Business" "Microsoft.Office"
+goto postInstall
 
+:checkUpdates
+echo Checking for updates...
+winget upgrade
+echo.
+set /p installUpdates="Install all updates? (y/n): "
+if /i "%installUpdates%"=="y" winget upgrade --all --accept-package-agreements --accept-source-agreements
+goto exit
+
+:postInstall
 :: Prepare icon directory
 echo Downloading support icon...
 mkdir "C:\ProgramData\ReliableIT" >nul 2>&1
