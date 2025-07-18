@@ -31,10 +31,17 @@ if %errorLevel% == 0 (
 
 :installWinget
 echo "Winget is not installed. Attempting to install..."
+echo "Downloading dependencies..."
+powershell -Command "Invoke-WebRequest -Uri 'https://github.com/microsoft/vclibs/releases/download/v14.0.30704.0/Microsoft.VCLibs.x64.14.00.Desktop.appx' -OutFile '%TEMP%\vclibs.appx' -UseBasicParsing"
+powershell -Command "Invoke-WebRequest -Uri 'https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/2.8.6' -OutFile '%TEMP%\xaml.zip' -UseBasicParsing"
+powershell -Command "Expand-Archive -Path '%TEMP%\xaml.zip' -DestinationPath '%TEMP%\xaml' -Force"
+echo "Installing dependencies..."
+powershell -Command "Add-AppxPackage -Path '%TEMP%\vclibs.appx'"
+powershell -Command "Add-AppxPackage -Path '%TEMP%\xaml\tools\AppX\x64\Release\Microsoft.UI.Xaml.2.8.appx'"
 echo "Downloading winget..."
-powershell -Command "Invoke-WebRequest -Uri 'https://github.com/microsoft/winget-cli/releases/download/v1.11.370-preview/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile '%TEMP%\winget.msixbundle' -UseBasicParsing | Write-Progress -Activity 'Downloading winget' -Status 'Downloading...' -PercentComplete (Get-Item '%TEMP%\winget.msixbundle').Length / 1000000 * 100"
+powershell -Command "Invoke-WebRequest -Uri 'https://github.com/microsoft/winget-cli/releases/download/v1.11.400/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile '%TEMP%\winget.msixbundle' -UseBasicParsing"
 echo "Installing winget..."
-powershell -Command "Add-AppxPackage -Path '%TEMP%\winget.msixbundle' | Write-Progress -Activity 'Installing winget' -Status 'Installing...' -PercentComplete 50"
+powershell -Command "Add-AppxPackage -Path '%TEMP%\winget.msixbundle'"
 winget --version >nul 2>&1
 if %errorLevel% == 0 (
     echo Winget installed successfully.
