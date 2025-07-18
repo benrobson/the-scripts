@@ -1,4 +1,0 @@
-# PyInstaller
-tools/build/
-tools/dist/
-tools/*.spec
