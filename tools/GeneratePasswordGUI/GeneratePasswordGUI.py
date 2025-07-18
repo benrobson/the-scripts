@@ -58,7 +58,6 @@ class PasswordGenerator(tk.Tk):
 
         self.password_var = tk.StringVar()
         self.create_widgets()
-        self.regenerate_password()
 
     def get_password_strength(self, password):
         """
@@ -131,7 +130,7 @@ class PasswordGenerator(tk.Tk):
                                           command=self.regenerate_password)
         self.generate_button.pack(side="right", expand=True, fill="x", padx=(5, 0))
 
-        self.update_strength_indicator()
+        self.regenerate_password()
 
     def update_strength_indicator(self):
         """
