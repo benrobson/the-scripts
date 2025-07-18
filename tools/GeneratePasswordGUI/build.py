@@ -34,8 +34,12 @@ def build(add_to_startup=False):
     if add_to_startup:
         startup_folder = get_startup_folder()
         if startup_folder:
-            shutil.copy(os.path.join('dist', f'{name}.exe'), startup_folder)
-            print(f"Added {name}.exe to startup folder.")
+            try:
+                shutil.copy(os.path.join(script_dir, 'dist', f'{name}.exe'), startup_folder)
+                print(f"Added {name}.exe to startup folder.")
+            except PermissionError:
+                print("Permission denied: Could not copy to startup folder.")
+                print("Please run this script as an administrator to add the application to startup.")
 
 if __name__ == '__main__':
     add_to_startup = '--startup' in sys.argv
