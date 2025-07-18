@@ -7,9 +7,8 @@ The password consists of two random words, a random number, and a random symbol.
 The user can copy the password to the clipboard or generate a new one.
 """
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import ttk, messagebox
 import random
-import string
 
 class PasswordGenerator(tk.Tk):
     """
@@ -21,8 +20,14 @@ class PasswordGenerator(tk.Tk):
         """
         super().__init__()
         self.title("Password Generator")
-        self.geometry("300x200")
+        self.geometry("400x150")
         self.resizable(False, False)
+
+        # Style configuration
+        style = ttk.Style(self)
+        style.theme_use('clam')
+        style.configure("TButton", padding=6, relief="flat", background="#cccccc")
+        style.configure("TEntry", padding=6, relief="flat")
 
         self.word_list = [
             "computer", "school", "teacher", "student", "pen",
@@ -72,14 +77,20 @@ class PasswordGenerator(tk.Tk):
         """
         Creates the widgets for the GUI.
         """
-        self.password_entry = tk.Entry(self, textvariable=self.password_var, state="readonly", width=40)
-        self.password_entry.pack(pady=20)
+        main_frame = ttk.Frame(self, padding="20")
+        main_frame.pack(expand=True, fill="both")
 
-        self.copy_button = tk.Button(self, text="Copy to Clipboard", command=self.copy_to_clipboard)
-        self.copy_button.pack(pady=5)
+        self.password_entry = ttk.Entry(main_frame, textvariable=self.password_var, state="readonly", font=("Arial", 12))
+        self.password_entry.pack(fill="x", expand=True)
 
-        self.generate_button = tk.Button(self, text="Generate New Password", command=self.regenerate_password)
-        self.generate_button.pack(pady=5)
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill="x", expand=True, pady=10)
+
+        self.copy_button = ttk.Button(button_frame, text="Copy to Clipboard", command=self.copy_to_clipboard)
+        self.copy_button.pack(side="left", expand=True, fill="x", padx=(0, 5))
+
+        self.generate_button = ttk.Button(button_frame, text="Generate New Password", command=self.regenerate_password)
+        self.generate_button.pack(side="right", expand=True, fill="x", padx=(5, 0))
 
     def copy_to_clipboard(self):
         """
