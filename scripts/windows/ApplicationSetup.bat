@@ -30,10 +30,11 @@ if %errorLevel% == 0 (
 )
 
 :installWinget
-echo Downloading winget...
-powershell -Command "Invoke-WebRequest -Uri 'https://github.com/microsoft/winget-cli/releases/download/v1.11.400/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile '%TEMP%\winget.msixbundle' -UseBasicParsing"
-echo Installing winget...
-powershell -Command "Add-AppxPackage -Path '%TEMP%\winget.msixbundle'"
+echo "Winget is not installed. Attempting to install..."
+echo "Downloading winget..."
+powershell -Command "Invoke-WebRequest -Uri 'https://github.com/microsoft/winget-cli/releases/download/v1.11.370-preview/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile '%TEMP%\winget.msixbundle' -UseBasicParsing | Write-Progress -Activity 'Downloading winget' -Status 'Downloading...' -PercentComplete (Get-Item '%TEMP%\winget.msixbundle').Length / 1000000 * 100"
+echo "Installing winget..."
+powershell -Command "Add-AppxPackage -Path '%TEMP%\winget.msixbundle' | Write-Progress -Activity 'Installing winget' -Status 'Installing...' -PercentComplete 50"
 winget --version >nul 2>&1
 if %errorLevel% == 0 (
     echo Winget installed successfully.
