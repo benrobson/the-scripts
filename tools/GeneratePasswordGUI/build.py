@@ -17,7 +17,7 @@ def build(add_to_startup=False):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     script = os.path.join(script_dir, 'GeneratePasswordGUI.py')
     name = 'GeneratePasswordGUI'
-    icon = os.path.join('favicon.ico')
+    icon = os.path.join(script_dir, '..', '..', 'scripts', 'assets', 'favicon.ico')
 
     pyinstaller_args = [
         '--name=%s' % name,

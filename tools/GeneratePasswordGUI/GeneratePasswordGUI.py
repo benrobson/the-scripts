@@ -56,12 +56,9 @@ class PasswordGenerator(tk.Tk):
         ]
         self.symbols = "!@#$%^&*"
 
-        self.password = self.generate_password()
-
         self.password_var = tk.StringVar()
-        self.password_var.set(self.password)
-
         self.create_widgets()
+        self.regenerate_password()
 
     def get_password_strength(self, password):
         """
@@ -83,7 +80,8 @@ class PasswordGenerator(tk.Tk):
         word2 = random.choice(self.word_list)
         number = random.randint(10, 100)
         symbol = random.choice(self.symbols)
-        return f"{word1}{number}{symbol}{word2}"
+        password = f"{word1}{number}{symbol}{word2}"
+        return password.capitalize()
 
     def create_widgets(self):
         """
