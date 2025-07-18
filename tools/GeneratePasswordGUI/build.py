@@ -13,17 +13,19 @@ def build(add_to_startup=False):
     """
     Builds the executable.
     """
-    script = 'GeneratePasswordGUI.py'
-    name = 'GeneratePasswordGUI'
     # Get the absolute path to the script's directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    icon = os.path.join(script_dir, '..', '..', 'scripts', 'assets', 'gen-password.ico')
+    script = os.path.join(script_dir, 'GeneratePasswordGUI.py')
+    name = 'GeneratePasswordGUI'
+    icon = os.path.join(script_dir, '..', '..', 'scripts', 'assets', 'icon.ico')
 
     pyinstaller_args = [
         '--name=%s' % name,
         '--onefile',
         '--windowed',
         '--icon=%s' % icon,
+        '--distpath=%s' % os.path.join(script_dir, 'dist'),
+        '--workpath=%s' % os.path.join(script_dir, 'build'),
         script,
     ]
 
