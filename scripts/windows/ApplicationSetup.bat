@@ -9,7 +9,7 @@ net session >nul 2>&1
 if %errorLevel% == 0 (
     color 9
     echo Success: Administrative permissions confirmed.
-    goto checkWinget
+    goto AdminAccess
 ) else (
     color CE
     echo Failure: Current permissions are inadequate.
@@ -18,43 +18,12 @@ if %errorLevel% == 0 (
     exit
 )
 
-:checkWinget
-echo Checking for winget...
-winget --version >nul 2>&1
-if %errorLevel% == 0 (
-    echo Winget is already installed.
-    goto installApps
-) else (
-    echo Winget is not installed. Attempting to install...
-    goto installWinget
-)
-
-:installWinget
-echo "Winget is not installed. Attempting to install..."
-echo "Downloading dependencies..."
-powershell -Command "Invoke-WebRequest -Uri 'https://github.com/microsoft/vclibs/releases/download/v14.0.30704.0/Microsoft.VCLibs.x64.14.00.Desktop.appx' -OutFile '%TEMP%\vclibs.appx' -UseBasicParsing"
-powershell -Command "Invoke-WebRequest -Uri 'https://www.nuget.org/api/v2/package/Microsoft.UI.Xaml/2.8.6' -OutFile '%TEMP%\xaml.zip' -UseBasicParsing"
-powershell -Command "Expand-Archive -Path '%TEMP%\xaml.zip' -DestinationPath '%TEMP%\xaml' -Force"
-echo "Installing dependencies..."
-powershell -Command "Add-AppxPackage -Path '%TEMP%\vclibs.appx'"
-powershell -Command "Add-AppxPackage -Path '%TEMP%\xaml\tools\AppX\x64\Release\Microsoft.UI.Xaml.2.8.appx'"
-echo "Downloading winget..."
-powershell -Command "Invoke-WebRequest -Uri 'https://github.com/microsoft/winget-cli/releases/download/v1.11.400/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle' -OutFile '%TEMP%\winget.msixbundle' -UseBasicParsing"
-echo "Installing winget..."
-powershell -Command "Add-AppxPackage -Path '%TEMP%\winget.msixbundle'"
-winget --version >nul 2>&1
-if %errorLevel% == 0 (
-    echo Winget installed successfully.
-    goto installApps
-) else (
-    color CE
-    echo Failed to install winget.
-    timeout 7
-    exit
-)
-
-:installApps
+:AdminAccess
 echo.
+echo Success: Administrative permissions confirmed.
+
+set today=%date:~10,4%-%date:~7,2%-%date:~4,2%
+
 echo ============================================
 echo ====   Application Installation Script  ====
 echo ============================================
@@ -64,11 +33,11 @@ echo.
 echo What would you like to do?
 echo.
 echo 1. Install standard applications
-echo 2. Check for updates
+echo 2. Check for Windows updates
 echo.
 set /p choice="Enter your choice: "
 if /i "%choice%"=="1" goto installStandardApps
-if /i "%choice%"=="2" goto checkUpdates
+if /i "%choice%"=="2" goto checkWindowsUpdates
 goto exit
 
 :installStandardApps
@@ -79,12 +48,12 @@ call :installApp "Google Chrome" "Google.Chrome"
 call :installApp "Microsoft 365 Apps for Business" "Microsoft.Office"
 goto postInstall
 
-:checkUpdates
-echo Checking for updates...
-winget upgrade
+:checkWindowsUpdates
+echo Checking for Windows updates...
+powershell -Command "$updateSession = New-Object -ComObject Microsoft.Update.Session; $updateSearcher = $updateSession.CreateUpdateSearcher(); $searchResult = $updateSearcher.Search('IsInstalled=0'); $searchResult.Updates"
 echo.
 set /p installUpdates="Install all updates? (y/n): "
-if /i "%installUpdates%"=="y" winget upgrade --all --accept-package-agreements --accept-source-agreements
+if /i "%installUpdates%"=="y" powershell -Command "$updateSession = New-Object -ComObject Microsoft.Update.Session; $updateSearcher = $updateSession.CreateUpdateSearcher(); $searchResult = $updateSearcher.Search('IsInstalled=0'); $updatesToInstall = New-Object -ComObject Microsoft.Update.UpdateColl; foreach ($update in $searchResult.Updates) { $updatesToInstall.Add($update) }; $installer = $updateSession.CreateUpdateInstaller(); $installer.Updates = $updatesToInstall; $installer.Install()"
 goto exit
 
 :postInstall
