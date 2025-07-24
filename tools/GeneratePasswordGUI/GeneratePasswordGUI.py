@@ -41,9 +41,9 @@ class PasswordGenerator(tk.Tk):
             "sweater", "dress", "shorts", "skirt", "glasses",
             "hat", "gloves", "scarf", "boots", "backpack",
             "lunchbox", "bedroom", "kitchen", "bathroom", "livingroom",
-            "bed", "table", "chair", "sofa", "TV",
+            "bed", "table", "chair", "sofa",
             "computer", "phone", "door", "window", "floor",
-            "fruit", "vegetable", "pizza", "cake", "ice cream",
+            "fruit", "vegetable", "pizza", "cake",
             "candy", "cookie", "sandwich", "juice", "milk",
             "water", "bread", "cheese", "chicken", "pasta",
             "rice", "soup", "salad", "burger", "fries",
@@ -66,7 +66,7 @@ class PasswordGenerator(tk.Tk):
         """
         word1 = random.choice(self.word_list)
         word2 = random.choice(self.word_list)
-        number = random.randint(10, 100)
+        number = random.randint(10, 99)
         symbol = random.choice(self.symbols)
         password = f"{word1}{number}{symbol}{word2}"
         return password.capitalize()
