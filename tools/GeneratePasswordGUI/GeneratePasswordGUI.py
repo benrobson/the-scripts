@@ -18,7 +18,7 @@ def get_word_list():
     try:
         response = requests.get("https://random-word-api.herokuapp.com/word?number=100")
         response.raise_for_status()  # Raise an exception for bad status codes
-        return response.json()
+        return response.json(), "API"
     except requests.exceptions.RequestException:
         print("Failed to fetch words from API, using fallback list.")
         return [
@@ -45,7 +45,7 @@ def get_word_list():
             "orange", "pear", "peach", "grapefruit", "lemon",
             "watermelon", "pineapple", "cherry", "blueberry", "raspberry",
             "peas", "corn", "beans", "pumpkin", "cucumber"
-        ]
+        ], "Fallback"
 
 class PasswordGenerator(tk.Tk):
     """
@@ -69,7 +69,8 @@ class PasswordGenerator(tk.Tk):
         self.symbols = "!@#$%^&*"
 
         self.password_var = tk.StringVar()
-        self.word_list = get_word_list()
+        self.generation_count = 0
+        self.word_list, self.api_status = get_word_list()
         self.create_widgets()
         self.regenerate_password()
 
@@ -94,6 +95,12 @@ class PasswordGenerator(tk.Tk):
         self.password_entry = ttk.Entry(main_frame, textvariable=self.password_var, state="readonly", font=("Arial", 12))
         self.password_entry.pack(fill="x", expand=True)
 
+        self.generation_label = ttk.Label(main_frame, text=f"Generations: {self.generation_count}")
+        self.generation_label.pack(fill="x", expand=True)
+
+        self.api_status_label = ttk.Label(main_frame, text=f"Wordlist Source: {self.api_status}")
+        self.api_status_label.pack(fill="x", expand=True)
+
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill="x", expand=True, pady=10)
 
@@ -117,6 +124,8 @@ class PasswordGenerator(tk.Tk):
         """
         self.password = self.generate_password()
         self.password_var.set(self.password)
+        self.generation_count += 1
+        self.generation_label.config(text=f"Generations: {self.generation_count}")
 
 if __name__ == "__main__":
     app = PasswordGenerator()
