@@ -11,17 +11,18 @@ from tkinter import ttk, messagebox
 import random
 import requests
 
+import json
+
 def get_word_list():
     """
     Fetches a list of words from a public API, with a fallback to a local list.
     """
     try:
-        response = requests.get("https://random-word-api.herokuapp.com/word?number=100")
+        response = requests.get("https://api.datamuse.com/words?rel_trg=common&max=100")
         response.raise_for_status()  # Raise an exception for bad status codes
-        words = response.json()
-        simple_words = [word for word in words if len(word) <= 8]
-        return simple_words, "API"
-    except requests.exceptions.RequestException:
+        words = [item['word'] for item in response.json()]
+        return words, "API"
+    except (requests.exceptions.RequestException, json.JSONDecodeError):
         print("Failed to fetch words from API, using fallback list.")
         return [
             "computer", "school", "teacher", "student", "pen",
@@ -65,7 +66,6 @@ class PasswordGenerator(tk.Tk):
         # Style configuration
         style = ttk.Style(self)
         style.theme_use('clam')
-        style.configure("TButton", padding=6, relief="flat")
         style.configure("TEntry", padding=6, relief="flat")
 
         self.symbols = "!@#$%^&*"
@@ -106,10 +106,10 @@ class PasswordGenerator(tk.Tk):
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill="x", expand=True, pady=10)
 
-        self.copy_button = ttk.Button(button_frame, text="Copy to Clipboard", command=self.copy_to_clipboard)
+        self.copy_button = ttk.Button(button_frame, text="Copy to Clipboard", command=self.copy_to_clipboard, style="TButton")
         self.copy_button.pack(side="left", expand=True, fill="x", padx=(0, 5))
 
-        self.generate_button = ttk.Button(button_frame, text="Generate New Password", command=self.regenerate_password)
+        self.generate_button = ttk.Button(button_frame, text="Generate New Password", command=self.regenerate_password, style="TButton")
         self.generate_button.pack(side="right", expand=True, fill="x", padx=(5, 0))
 
     def copy_to_clipboard(self):
