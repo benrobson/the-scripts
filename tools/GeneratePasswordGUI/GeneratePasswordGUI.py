@@ -60,7 +60,7 @@ class PasswordGenerator(tk.Tk):
         """
         super().__init__()
         self.title("Password Generator")
-        self.geometry("400x150")
+        self.geometry("400x200")
         self.resizable(False, False)
 
         # Style configuration
