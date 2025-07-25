@@ -80,8 +80,7 @@ class PasswordGenerator(tk.Tk):
         """
         Generates a new password.
         """
-        word1 = random.choice(self.word_list)
-        word2 = random.choice(self.word_list)
+        word1, word2 = random.sample(self.word_list, 2)
         number = random.randint(10, 99)
         symbol = random.choice(self.symbols)
         password = f"{word1}{number}{symbol}{word2}"
