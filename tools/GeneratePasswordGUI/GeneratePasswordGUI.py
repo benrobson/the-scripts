@@ -18,7 +18,9 @@ def get_word_list():
     try:
         response = requests.get("https://random-word-api.herokuapp.com/word?number=100")
         response.raise_for_status()  # Raise an exception for bad status codes
-        return response.json(), "API"
+        words = response.json()
+        simple_words = [word for word in words if len(word) <= 8]
+        return simple_words, "API"
     except requests.exceptions.RequestException:
         print("Failed to fetch words from API, using fallback list.")
         return [
@@ -63,7 +65,7 @@ class PasswordGenerator(tk.Tk):
         # Style configuration
         style = ttk.Style(self)
         style.theme_use('clam')
-        style.configure("TButton", padding=6, relief="flat", background="#cccccc")
+        style.configure("TButton", padding=6, relief="flat")
         style.configure("TEntry", padding=6, relief="flat")
 
         self.symbols = "!@#$%^&*"
