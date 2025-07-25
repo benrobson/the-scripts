@@ -9,27 +9,19 @@ The user can copy the password to the clipboard or generate a new one.
 import tkinter as tk
 from tkinter import ttk, messagebox
 import random
+import requests
 
-class PasswordGenerator(tk.Tk):
+def get_word_list():
     """
-    Password Generator GUI application.
+    Fetches a list of words from a public API, with a fallback to a local list.
     """
-    def __init__(self):
-        """
-        Initializes the application.
-        """
-        super().__init__()
-        self.title("Password Generator")
-        self.geometry("400x150")
-        self.resizable(False, False)
-
-        # Style configuration
-        style = ttk.Style(self)
-        style.theme_use('clam')
-        style.configure("TButton", padding=6, relief="flat", background="#cccccc")
-        style.configure("TEntry", padding=6, relief="flat")
-
-        self.word_list = [
+    try:
+        response = requests.get("https://random-word-api.herokuapp.com/word?number=100")
+        response.raise_for_status()  # Raise an exception for bad status codes
+        return response.json()
+    except requests.exceptions.RequestException:
+        print("Failed to fetch words from API, using fallback list.")
+        return [
             "computer", "school", "teacher", "student", "pen",
             "pencil", "desk", "chair", "paper", "eraser",
             "ruler", "math", "science", "art", "music",
@@ -54,9 +46,30 @@ class PasswordGenerator(tk.Tk):
             "watermelon", "pineapple", "cherry", "blueberry", "raspberry",
             "peas", "corn", "beans", "pumpkin", "cucumber"
         ]
+
+class PasswordGenerator(tk.Tk):
+    """
+    Password Generator GUI application.
+    """
+    def __init__(self):
+        """
+        Initializes the application.
+        """
+        super().__init__()
+        self.title("Password Generator")
+        self.geometry("400x150")
+        self.resizable(False, False)
+
+        # Style configuration
+        style = ttk.Style(self)
+        style.theme_use('clam')
+        style.configure("TButton", padding=6, relief="flat", background="#cccccc")
+        style.configure("TEntry", padding=6, relief="flat")
+
         self.symbols = "!@#$%^&*"
 
         self.password_var = tk.StringVar()
+        self.word_list = get_word_list()
         self.create_widgets()
         self.regenerate_password()
 
