@@ -8,20 +8,18 @@ import requests
 GRAPH_API_ENDPOINT = 'https://graph.microsoft.com/v1.0'
 SCOPES = ['Mail.Read']
 
-# Function to acquire a token using device flow
-def acquire_token(app_id, tenant_id):
-    """Acquire a token from Azure AD."""
+# Function to acquire a token using a client secret
+def acquire_token(app_id, tenant_id, client_secret):
+    """Acquire a token from Azure AD using a client secret."""
     authority = f"https://login.microsoftonline.com/{tenant_id}"
-    app = msal.PublicClientApplication(app_id, authority=authority)
+    app = msal.ConfidentialClientApplication(
+        client_id=app_id,
+        authority=authority,
+        client_credential=client_secret
+    )
 
-    flow = app.initiate_device_flow(scopes=SCOPES)
-    if "user_code" not in flow:
-        raise ValueError(
-            "Fail to create device flow. Err: %s" % json.dumps(flow, indent=4)
-        )
-
-    print(flow["message"])
-    result = app.acquire_token_by_device_flow(flow)
+    # The scope for client credentials flow is different
+    result = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
     return result
 
 # Function to search emails
@@ -86,11 +84,12 @@ def main():
     # Get user input for app_id, tenant_id, user_id, and search_email
     app_id = input("Enter your Application (client) ID: ")
     tenant_id = input("Enter your Directory (tenant) ID: ")
+    client_secret = input("Enter your Client Secret: ")
     user_id = input("Enter the email address of the mailbox to search: ")
     search_email = input("Enter the email address to search for (sender or recipient): ")
 
     # Acquire token
-    token_result = acquire_token(app_id, tenant_id)
+    token_result = acquire_token(app_id, tenant_id, client_secret)
 
     if "access_token" in token_result:
         access_token = token_result['access_token']
