@@ -28,6 +28,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
+Add-Type -AssemblyName System.Xaml
 Add-Type -AssemblyName System.Windows.Forms
 
 # --- XAML UI Definition ---
@@ -115,8 +116,7 @@ $xaml = @"
 </Window>
 "@
 
-$reader = (New-Object System.Xml.XmlNodeReader([xml]$xaml))
-$window = [Windows.Markup.XamlReader]::Load($reader)
+$window = [System.Windows.Markup.XamlReader]::Parse($xaml)
 
 # UI Elements
 $txtSiteUrl = $window.FindName("txtSiteUrl")
