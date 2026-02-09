@@ -22,7 +22,7 @@ Catch {
 # Get items from the list/folder
 Try {
     Write-Host "Fetching items from '$ListName'..." -ForegroundColor Cyan
-    $items = Get-PnPListItem -List $ListName -FolderServerRelativeUrl $RelativeFolderPath -Recursive -PageSize 1000
+    $items = Get-PnPListItem -List $ListName -FolderServerRelativeUrl $RelativeFolderPath -Recursive -PageSize 1000 -Includes "HasUniqueRoleAssignments","FileLeafRef"
 }
 Catch {
     Write-Host "Failed to retrieve items: $($_.Exception.Message)" -ForegroundColor Red
@@ -43,7 +43,7 @@ ForEach ($item in $items) {
     Try {
         # Check if item has unique permissions
         If ($item.HasUniqueRoleAssignments) {
-            Write-Host "[$counter/$totalCount] Resetting unique permissions: $itemName" -ForegroundColor Green
+            Write-Host "[$counter/$totalCount] Resetting unique permissions: $($itemName)" -ForegroundColor Green
             $item.ResetRoleInheritance()
             # Invoke-PnPQuery handles 429/503 throttling automatically with retries
             Invoke-PnPQuery -RetryCount 10
@@ -54,7 +54,7 @@ ForEach ($item in $items) {
         }
     }
     Catch {
-        Write-Host "[$counter/$totalCount] Error processing $itemName: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[$counter/$totalCount] Error processing $($itemName): $($_.Exception.Message)" -ForegroundColor Red
 
         # Explicit throttling check as a backup
         If ($_.Exception.Message -like "*429*" -or $_.Exception.Message -like "*503*") {

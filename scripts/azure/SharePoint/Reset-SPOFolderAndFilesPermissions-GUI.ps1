@@ -12,7 +12,7 @@
 # Ensure we are running in STA mode for WPF
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     Write-Host "Re-launching in STA mode..." -ForegroundColor Yellow
-    powershell.exe -STA -File $PSCommandPath
+    powershell.exe -STA -File "$PSCommandPath"
     return
 }
 
@@ -125,7 +125,7 @@ $btnScan = $window.FindName("btnScan")
 $btnExecute = $window.FindName("btnExecute")
 
 # State
-$global:ItemsToProcess = @()
+$global:ItemsToProcess = New-Object System.Collections.Generic.List[PSObject]
 
 # Helpers
 Function Write-Log {
@@ -177,7 +177,7 @@ $btnScan.Add_Click({
 
     Write-Log "Scanning '$($lib.Title)'..."
 
-    $global:ItemsToProcess = @()
+    $global:ItemsToProcess.Clear()
     $folderCount = 0
     $fileCount = 0
     $totalSize = 0
@@ -187,12 +187,12 @@ $btnScan.Add_Click({
     # We do the scan on the UI thread for simplicity in this script, but using DoEvents to keep it somewhat responsive
     Try {
         # Using Get-PnPListItem with -Recursive is the most efficient way to get all items
-        $items = Get-PnPListItem -List $lib -FolderServerRelativeUrl $folderPath -Recursive -PageSize 1000
+        $items = Get-PnPListItem -List $lib -FolderServerRelativeUrl $folderPath -Recursive -PageSize 1000 -Includes "HasUniqueRoleAssignments","FileLeafRef","FileRef","File_x0020_Size","FileSystemObjectType"
 
         ForEach ($item in $items) {
             # Check for unique permissions if we want to be even more precise,
             # but for scanning we just count everything.
-            $global:ItemsToProcess += $item
+            $global:ItemsToProcess.Add($item)
             If ($item.FileSystemObjectType -eq "Folder") {
                 $folderCount++
             } Else {
@@ -252,19 +252,19 @@ $btnExecute.Add_Click({
 
             If ($hasUnique) {
                 If (-not $isDryRun) {
-                    Write-Log "Resetting permissions: $itemName"
+                    Write-Log "Resetting permissions: $($itemName)"
                     $item.ResetRoleInheritance()
                     # Use Invoke-PnPQuery with built-in retry logic for 429s
                     Invoke-PnPQuery -RetryCount 10
                 } Else {
-                    Write-Log "[DRY RUN] Would reset permissions: $itemName"
+                    Write-Log "[DRY RUN] Would reset permissions: $($itemName)"
                 }
             } Else {
-                # Write-Log "Skipping (Already inheriting): $itemName" -Type "DEBUG"
+                # Write-Log "Skipping (Already inheriting): $($itemName)" -Type "DEBUG"
             }
         }
         Catch {
-            Write-Log "Error on $itemName: $($_.Exception.Message)" -Type "ERROR"
+            Write-Log "Error on $($itemName): $($_.Exception.Message)" -Type "ERROR"
             # Explicit 429 check
             If ($_.Exception.Message -like "*429*" -or $_.Exception.Message -like "*503*") {
                 Write-Log "Throttling detected. Waiting 10 seconds..." -Type "WARNING"
