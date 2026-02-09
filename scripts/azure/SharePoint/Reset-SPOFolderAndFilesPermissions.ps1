@@ -15,6 +15,12 @@ $RelativeFolderPath = "" # e.g. "Shared Documents/Subfolder". Leave blank for li
 
 # Connect to SharePoint Online (Modern Auth)
 Try {
+    Write-Host "-----------------------------------------------------------------------" -ForegroundColor Yellow
+    Write-Host " AUTHENTICATION REQUIRED" -ForegroundColor Yellow
+    Write-Host " Please log in with a Global Administrator or SharePoint Admin account" -ForegroundColor Yellow
+    Write-Host " in the browser window that appears." -ForegroundColor Yellow
+    Write-Host "-----------------------------------------------------------------------`n" -ForegroundColor Yellow
+
     Write-Host "Connecting to $SiteURL..." -ForegroundColor Cyan
     Connect-PnPOnline -Url $SiteURL -Interactive -ErrorAction Stop
 }

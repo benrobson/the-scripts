@@ -157,7 +157,40 @@ $btnExecute = $window.FindName("btnExecute")
 # --- State ---
 $global:ItemsToProcess = New-Object System.Collections.Generic.List[PSObject]
 
+$window.Add_Loaded({
+    Write-Log "Welcome! Please enter a Site URL and click 'Connect' to begin."
+    Write-Log "Authentication as a Global Admin or SharePoint Admin is required."
+})
+
 # --- Helpers ---
+Function Start-Connection {
+    $url = $txtSiteUrl.Text.Trim()
+    If (-not $url) { [System.Windows.MessageBox]::Show("Please enter a Site URL."); return }
+
+    Write-Log "-----------------------------------------------------------------------"
+    Write-Log " AUTHENTICATION REQUIRED"
+    Write-Log " Please log in with a Global Administrator or SharePoint Admin account"
+    Write-Log " in the browser window that appears."
+    Write-Log "-----------------------------------------------------------------------"
+
+    Write-Log "Connecting to $url..."
+    Try {
+        Connect-PnPOnline -Url $url -Interactive -ErrorAction Stop
+        Write-Log "Connected successfully!" -Type "SUCCESS"
+
+        $libraries = Get-PnPList | Where-Object { $_.BaseTemplate -eq 101 -and -not $_.Hidden }
+        $cmbLibrary.ItemsSource = $libraries
+        $cmbLibrary.DisplayMemberPath = "Title"
+        $cmbLibrary.IsEnabled = $True
+        $txtFolderPath.IsEnabled = $True
+        $btnScan.IsEnabled = $True
+    }
+    Catch {
+        Write-Log "Connection failed: $($_.Exception.Message)" -Type "ERROR"
+        [System.Windows.MessageBox]::Show("Failed to connect.`n`n$($_.Exception.Message)")
+    }
+}
+
 Function Write-Log {
     Param([string]$Message, [string]$Type = "INFO")
     $timestamp = Get-Date -Format "HH:mm:ss"
@@ -177,25 +210,7 @@ Function Format-Size {
 
 # --- Connection ---
 $btnConnect.Add_Click({
-    $url = $txtSiteUrl.Text.Trim()
-    If (-not $url) { [System.Windows.MessageBox]::Show("Please enter a Site URL."); return }
-
-    Write-Log "Connecting to $url..."
-    Try {
-        Connect-PnPOnline -Url $url -Interactive -ErrorAction Stop
-        Write-Log "Connected successfully!" -Type "SUCCESS"
-
-        $libraries = Get-PnPList | Where-Object { $_.BaseTemplate -eq 101 -and -not $_.Hidden }
-        $cmbLibrary.ItemsSource = $libraries
-        $cmbLibrary.DisplayMemberPath = "Title"
-        $cmbLibrary.IsEnabled = $True
-        $txtFolderPath.IsEnabled = $True
-        $btnScan.IsEnabled = $True
-    }
-    Catch {
-        Write-Log "Connection failed: $($_.Exception.Message)" -Type "ERROR"
-        [System.Windows.MessageBox]::Show("Failed to connect.`n`n$($_.Exception.Message)")
-    }
+    Start-Connection
 })
 
 # --- Scan ---
@@ -301,4 +316,14 @@ $btnExecute.Add_Click({
 })
 
 # --- Show Window ---
+# If window was shown via Auto-Connect, we can't call ShowDialog.
+# Instead, we'll use ShowDialog by default, but if we need to auto-start,
+# we'll use a 'ContentRendered' event to trigger it.
+
+$window.Add_ContentRendered({
+    If ($PSBoundParameters.ContainsKey('SiteURL')) {
+        Start-Connection
+    }
+})
+
 $window.ShowDialog() | Out-Null
