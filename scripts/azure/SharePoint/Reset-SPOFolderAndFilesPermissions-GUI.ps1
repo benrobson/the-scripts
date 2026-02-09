@@ -33,13 +33,15 @@ Try {
     Add-Type -AssemblyName System.Xaml
     Add-Type -AssemblyName System.Windows.Forms
 } Catch {
-    # Fallback for some environments
     [void][System.Reflection.Assembly]::LoadWithPartialName('PresentationFramework')
     [void][System.Reflection.Assembly]::LoadWithPartialName('PresentationCore')
     [void][System.Reflection.Assembly]::LoadWithPartialName('WindowsBase')
     [void][System.Reflection.Assembly]::LoadWithPartialName('System.Xaml')
     [void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
 }
+
+# Force a WPF type to load to ensure assembly is active
+[void][System.Windows.Window]
 
 # --- XAML UI Definition ---
 $xaml = @"
@@ -128,10 +130,11 @@ $xaml = @"
 
 # --- Load XAML ---
 Try {
+    # Ensure namespaces and attributes are correct for XamlReader
     $xaml = $xaml -replace 'x:Name', 'Name'
-    [xml]$xml = $xaml
-    $reader = New-Object System.Xml.XmlNodeReader $xml
-    $window = [Windows.Markup.XamlReader]::Load($reader)
+    $stringReader = New-Object System.IO.StringReader($xaml)
+    $xmlReader = [System.Xml.XmlReader]::Create($stringReader)
+    $window = [System.Windows.Markup.XamlReader]::Load($xmlReader)
 } Catch {
     Write-Host "Error loading XAML: $($_.Exception.Message)" -ForegroundColor Red
     If ($_.Exception.InnerException) { Write-Host "Inner Error: $($_.Exception.InnerException.Message)" -ForegroundColor Red }
@@ -316,10 +319,6 @@ $btnExecute.Add_Click({
 })
 
 # --- Show Window ---
-# If window was shown via Auto-Connect, we can't call ShowDialog.
-# Instead, we'll use ShowDialog by default, but if we need to auto-start,
-# we'll use a 'ContentRendered' event to trigger it.
-
 $window.Add_ContentRendered({
     If ($PSBoundParameters.ContainsKey('SiteURL')) {
         Start-Connection
