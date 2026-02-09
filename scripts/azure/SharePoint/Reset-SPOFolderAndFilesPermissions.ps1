@@ -2,8 +2,12 @@
 # Description: This script resets unique permissions on folders and files in a SharePoint document library.
 # This version uses PnP.PowerShell for modern authentication and robust execution.
 
+param (
+    [Parameter(Mandatory=$false)]
+    [string]$SiteURL = "https://SITECORP.sharepoint.com/sites/SITENAME"
+)
+
 # --- Variables ---
-$SiteURL = "https://SITECORP.sharepoint.com/sites/SITENAME"
 $ListName = "Documents"
 $RelativeFolderPath = "" # e.g. "Shared Documents/Subfolder". Leave blank for library root.
 

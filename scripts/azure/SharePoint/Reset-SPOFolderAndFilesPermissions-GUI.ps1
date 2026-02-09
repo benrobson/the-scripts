@@ -9,10 +9,19 @@
     Run in STA mode: powershell.exe -STA -File .\Reset-SPOFolderAndFilesPermissions-GUI.ps1
 #>
 
+param (
+    [Parameter(Mandatory=$false)]
+    [string]$SiteURL = "https://tenant.sharepoint.com/sites/yoursite"
+)
+
 # Ensure we are running in STA mode for WPF
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     Write-Host "Re-launching in STA mode..." -ForegroundColor Yellow
-    powershell.exe -STA -File "$PSCommandPath"
+    if ($PSBoundParameters.ContainsKey('SiteURL')) {
+        powershell.exe -STA -File "$PSCommandPath" -SiteURL "$SiteURL"
+    } else {
+        powershell.exe -STA -File "$PSCommandPath"
+    }
     return
 }
 
@@ -111,6 +120,7 @@ $window = [Windows.Markup.XamlReader]::Load($reader)
 
 # UI Elements
 $txtSiteUrl = $window.FindName("txtSiteUrl")
+$txtSiteUrl.Text = $SiteURL
 $btnConnect = $window.FindName("btnConnect")
 $cmbLibrary = $window.FindName("cmbLibrary")
 $txtFolderPath = $window.FindName("txtFolderPath")
