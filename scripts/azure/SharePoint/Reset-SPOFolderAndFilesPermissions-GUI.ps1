@@ -25,11 +25,21 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     return
 }
 
-Add-Type -AssemblyName PresentationFramework
-Add-Type -AssemblyName PresentationCore
-Add-Type -AssemblyName WindowsBase
-Add-Type -AssemblyName System.Xaml
-Add-Type -AssemblyName System.Windows.Forms
+# --- Load Assemblies ---
+Try {
+    Add-Type -AssemblyName PresentationFramework
+    Add-Type -AssemblyName PresentationCore
+    Add-Type -AssemblyName WindowsBase
+    Add-Type -AssemblyName System.Xaml
+    Add-Type -AssemblyName System.Windows.Forms
+} Catch {
+    # Fallback for some environments
+    [void][System.Reflection.Assembly]::LoadWithPartialName('PresentationFramework')
+    [void][System.Reflection.Assembly]::LoadWithPartialName('PresentationCore')
+    [void][System.Reflection.Assembly]::LoadWithPartialName('WindowsBase')
+    [void][System.Reflection.Assembly]::LoadWithPartialName('System.Xaml')
+    [void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
+}
 
 # --- XAML UI Definition ---
 $xaml = @"
@@ -55,8 +65,8 @@ $xaml = @"
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <Label Content="Site URL:" VerticalAlignment="Center"/>
-                <TextBox x:Name="txtSiteUrl" Grid.Column="1" Margin="10,0" VerticalContentAlignment="Center" Height="25" Text="https://tenant.sharepoint.com/sites/yoursite"/>
-                <Button x:Name="btnConnect" Grid.Column="2" Content="Connect" Width="100" Height="25"/>
+                <TextBox Name="txtSiteUrl" Grid.Column="1" Margin="10,0" VerticalContentAlignment="Center" Height="25" Text="https://tenant.sharepoint.com/sites/yoursite"/>
+                <Button Name="btnConnect" Grid.Column="2" Content="Connect" Width="100" Height="25"/>
             </Grid>
         </GroupBox>
 
@@ -70,10 +80,10 @@ $xaml = @"
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 <Label Content="Library:" VerticalAlignment="Center"/>
-                <ComboBox x:Name="cmbLibrary" Grid.Column="1" Margin="10,0" Height="25" IsEnabled="False"/>
+                <ComboBox Name="cmbLibrary" Grid.Column="1" Margin="10,0" Height="25" IsEnabled="False"/>
 
                 <Label Content="Folder Path:" Grid.Column="2" VerticalAlignment="Center"/>
-                <TextBox x:Name="txtFolderPath" Grid.Column="3" Margin="10,0" VerticalContentAlignment="Center" Height="25" IsEnabled="False" ToolTip="Relative path (e.g. Shared Documents/Subfolder). Leave blank for root."/>
+                <TextBox Name="txtFolderPath" Grid.Column="3" Margin="10,0" VerticalContentAlignment="Center" Height="25" IsEnabled="False" ToolTip="Relative path (e.g. Shared Documents/Subfolder). Leave blank for root."/>
             </Grid>
         </GroupBox>
 
@@ -82,43 +92,53 @@ $xaml = @"
             <UniformGrid Columns="4">
                 <StackPanel HorizontalAlignment="Center">
                     <Label Content="Total Folders" HorizontalAlignment="Center"/>
-                    <TextBlock x:Name="lblFolders" Text="0" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
+                    <TextBlock Name="lblFolders" Text="0" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel HorizontalAlignment="Center">
                     <Label Content="Total Files" HorizontalAlignment="Center"/>
-                    <TextBlock x:Name="lblFiles" Text="0" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
+                    <TextBlock Name="lblFiles" Text="0" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel HorizontalAlignment="Center">
                     <Label Content="Total Size" HorizontalAlignment="Center"/>
-                    <TextBlock x:Name="lblSize" Text="0 MB" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
+                    <TextBlock Name="lblSize" Text="0 MB" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel HorizontalAlignment="Center">
                     <Label Content="Est. Time" HorizontalAlignment="Center"/>
-                    <TextBlock x:Name="lblEstTime" Text="0s" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
+                    <TextBlock Name="lblEstTime" Text="0s" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"/>
                 </StackPanel>
             </UniformGrid>
         </GroupBox>
 
         <!-- Log Window -->
-        <TextBox x:Name="txtLog" Grid.Row="3" IsReadOnly="True" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"
+        <TextBox Name="txtLog" Grid.Row="3" IsReadOnly="True" VerticalScrollBarVisibility="Auto" AcceptsReturn="True"
                  Background="Black" Foreground="#00FF00" FontFamily="Consolas" FontSize="12" Margin="0,0,0,10"/>
 
         <!-- Progress Bar -->
-        <ProgressBar x:Name="progressBar" Grid.Row="4" Height="20" Margin="0,0,0,10" Minimum="0" Maximum="100"/>
+        <ProgressBar Name="progressBar" Grid.Row="4" Height="20" Margin="0,0,0,10" Minimum="0" Maximum="100"/>
 
         <!-- Action Buttons -->
         <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
-            <CheckBox x:Name="chkDryRun" Content="Dry Run (Log only)" VerticalAlignment="Center" IsChecked="True" Margin="0,0,20,0"/>
-            <Button x:Name="btnScan" Content="Scan Folder Tree" Width="120" Height="30" Margin="0,0,10,0" IsEnabled="False"/>
-            <Button x:Name="btnExecute" Content="Execute Reset" Width="120" Height="30" Background="#FF4B4B" Foreground="White" FontWeight="Bold" IsEnabled="False"/>
+            <CheckBox Name="chkDryRun" Content="Dry Run (Log only)" VerticalAlignment="Center" IsChecked="True" Margin="0,0,20,0"/>
+            <Button Name="btnScan" Content="Scan Folder Tree" Width="120" Height="30" Margin="0,0,10,0" IsEnabled="False"/>
+            <Button Name="btnExecute" Content="Execute Reset" Width="120" Height="30" Background="#FF4B4B" Foreground="White" FontWeight="Bold" IsEnabled="False"/>
         </StackPanel>
     </Grid>
 </Window>
 "@
 
-$window = [System.Windows.Markup.XamlReader]::Parse($xaml)
+# --- Load XAML ---
+Try {
+    $xaml = $xaml -replace 'x:Name', 'Name'
+    [xml]$xml = $xaml
+    $reader = New-Object System.Xml.XmlNodeReader $xml
+    $window = [Windows.Markup.XamlReader]::Load($reader)
+} Catch {
+    Write-Host "Error loading XAML: $($_.Exception.Message)" -ForegroundColor Red
+    If ($_.Exception.InnerException) { Write-Host "Inner Error: $($_.Exception.InnerException.Message)" -ForegroundColor Red }
+    return
+}
 
-# UI Elements
+# --- UI Elements ---
 $txtSiteUrl = $window.FindName("txtSiteUrl")
 $txtSiteUrl.Text = $SiteURL
 $btnConnect = $window.FindName("btnConnect")
@@ -134,10 +154,10 @@ $chkDryRun = $window.FindName("chkDryRun")
 $btnScan = $window.FindName("btnScan")
 $btnExecute = $window.FindName("btnExecute")
 
-# State
+# --- State ---
 $global:ItemsToProcess = New-Object System.Collections.Generic.List[PSObject]
 
-# Helpers
+# --- Helpers ---
 Function Write-Log {
     Param([string]$Message, [string]$Type = "INFO")
     $timestamp = Get-Date -Format "HH:mm:ss"
@@ -155,7 +175,7 @@ Function Format-Size {
     Else { "$Bytes Bytes" }
 }
 
-# Connection
+# --- Connection ---
 $btnConnect.Add_Click({
     $url = $txtSiteUrl.Text.Trim()
     If (-not $url) { [System.Windows.MessageBox]::Show("Please enter a Site URL."); return }
@@ -178,7 +198,7 @@ $btnConnect.Add_Click({
     }
 })
 
-# Scan
+# --- Scan ---
 $btnScan.Add_Click({
     If (-not $cmbLibrary.SelectedItem) { [System.Windows.MessageBox]::Show("Please select a library."); return }
 
@@ -194,23 +214,18 @@ $btnScan.Add_Click({
 
     $progressBar.IsIndeterminate = $True
 
-    # We do the scan on the UI thread for simplicity in this script, but using DoEvents to keep it somewhat responsive
     Try {
-        # Using Get-PnPListItem with -Recursive is the most efficient way to get all items
         $items = Get-PnPListItem -List $lib -FolderServerRelativeUrl $folderPath -Recursive -PageSize 1000 -Includes "HasUniqueRoleAssignments","FileLeafRef","FileRef","File_x0020_Size","FileSystemObjectType"
 
         ForEach ($item in $items) {
-            # Check for unique permissions if we want to be even more precise,
-            # but for scanning we just count everything.
             $global:ItemsToProcess.Add($item)
             If ($item.FileSystemObjectType -eq "Folder") {
                 $folderCount++
             } Else {
                 $fileCount++
-                $totalSize += [long]$item["File_x0020_Size"] # Standard internal name for file size
+                $totalSize += [long]$item["File_x0020_Size"]
             }
 
-            # Allow UI to refresh occasionally
             [System.Windows.Forms.Application]::DoEvents()
         }
 
@@ -218,7 +233,6 @@ $btnScan.Add_Click({
         $lblFiles.Text = $fileCount
         $lblSize.Text = Format-Size $totalSize
 
-        # Est. Time: ~0.5s per item for reset + overhead
         $estSecs = $global:ItemsToProcess.Count * 0.5
         $lblEstTime.Text = "$([Math]::Round($estSecs, 0))s"
 
@@ -231,7 +245,7 @@ $btnScan.Add_Click({
     $progressBar.IsIndeterminate = $False
 })
 
-# Execution
+# --- Execution ---
 $btnExecute.Add_Click({
     If ($global:ItemsToProcess.Count -eq 0) { return }
 
@@ -256,30 +270,23 @@ $btnExecute.Add_Click({
         $itemUrl = $item["FileRef"]
 
         Try {
-            # Check if item has unique permissions to avoid unnecessary calls
-            # Use CSOM property HasUniqueRoleAssignments
             $hasUnique = $item.HasUniqueRoleAssignments
 
             If ($hasUnique) {
                 If (-not $isDryRun) {
                     Write-Log "Resetting permissions: $($itemName)"
                     $item.ResetRoleInheritance()
-                    # Use Invoke-PnPQuery with built-in retry logic for 429s
                     Invoke-PnPQuery -RetryCount 10
                 } Else {
                     Write-Log "[DRY RUN] Would reset permissions: $($itemName)"
                 }
-            } Else {
-                # Write-Log "Skipping (Already inheriting): $($itemName)" -Type "DEBUG"
             }
         }
         Catch {
             Write-Log "Error on $($itemName): $($_.Exception.Message)" -Type "ERROR"
-            # Explicit 429 check
             If ($_.Exception.Message -like "*429*" -or $_.Exception.Message -like "*503*") {
                 Write-Log "Throttling detected. Waiting 10 seconds..." -Type "WARNING"
                 Start-Sleep -Seconds 10
-                # Could retry here, but Invoke-PnPQuery -RetryCount usually handles it
             }
         }
 
@@ -293,5 +300,5 @@ $btnExecute.Add_Click({
     [System.Windows.MessageBox]::Show("Finished!")
 })
 
-# Show Window
+# --- Show Window ---
 $window.ShowDialog() | Out-Null
