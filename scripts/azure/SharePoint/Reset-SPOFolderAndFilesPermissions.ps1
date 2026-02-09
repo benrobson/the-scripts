@@ -1,90 +1,78 @@
 # Script Name: Reset-SPOFolderAndFilesPermissions.ps1
 # Description: This script resets unique permissions on folders and files in a SharePoint document library.
+# This version uses PnP.PowerShell for modern authentication and robust execution.
 
-# Load SharePoint CSOM Assemblies
-Add-Type -Path "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI\Microsoft.SharePoint.Client.dll"
-Add-Type -Path "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI\Microsoft.SharePoint.Client.Runtime.dll"
- 
-# Function to Reset Permissions of all Sub-folders and Files in a Folder
-Function Reset-SPOFolderAndFilesPermissions([Microsoft.SharePoint.Client.Folder]$Folder, [System.Collections.Generic.HashSet[String]]$ProcessedItems)
-{
+param (
+    [Parameter(Mandatory=$false)]
+    [string]$SiteURL = "https://SITECORP.sharepoint.com/sites/SITENAME"
+)
+
+# --- Variables ---
+$ListName = "Documents"
+$RelativeFolderPath = "" # e.g. "Shared Documents/Subfolder". Leave blank for library root.
+
+# --- Execution ---
+
+# Connect to SharePoint Online (Modern Auth)
+Try {
+    Write-Host "-----------------------------------------------------------------------" -ForegroundColor Yellow
+    Write-Host " AUTHENTICATION REQUIRED" -ForegroundColor Yellow
+    Write-Host " Please log in with a Global Administrator or SharePoint Admin account" -ForegroundColor Yellow
+    Write-Host " in the browser window that appears." -ForegroundColor Yellow
+    Write-Host "-----------------------------------------------------------------------`n" -ForegroundColor Yellow
+
+    Write-Host "Connecting to $SiteURL..." -ForegroundColor Cyan
+    Connect-PnPOnline -Url $SiteURL -Interactive -ErrorAction Stop
+}
+Catch {
+    Write-Host "Failed to connect: $($_.Exception.Message)" -ForegroundColor Red
+    return
+}
+
+# Get items from the list/folder
+Try {
+    Write-Host "Fetching items from '$ListName'..." -ForegroundColor Cyan
+    $items = Get-PnPListItem -List $ListName -FolderServerRelativeUrl $RelativeFolderPath -Recursive -PageSize 1000 -Includes "HasUniqueRoleAssignments","FileLeafRef"
+}
+Catch {
+    Write-Host "Failed to retrieve items: $($_.Exception.Message)" -ForegroundColor Red
+    return
+}
+
+$totalCount = $items.Count
+Write-Host "Found $totalCount items to check." -ForegroundColor Yellow
+
+$counter = 0
+ForEach ($item in $items) {
+    $counter++
+    $itemName = $item["FileLeafRef"]
+
+    # Progress update in console
+    Write-Progress -Activity "Resetting Permissions" -Status "Processing: $itemName ($counter/$totalCount)" -PercentComplete (($counter / $totalCount) * 100)
+
     Try {
-        # Get all Sub Folders and Files
-        $Ctx.Load($Folder.Folders)
-        $Ctx.Load($Folder.Files)
-        $Ctx.ExecuteQuery()
-
-        # Iterate through each sub-folder and file of the folder
-        Foreach ($Item in $Folder.Folders + $Folder.Files | Where {$_.Name -ne "Forms" -and $_.Name -ne "Document"})
-        {
-            # Check if item has already been processed
-            If ($ProcessedItems.Contains($Item.ServerRelativeUrl)) {
-                Write-host "Item already processed. Skipping:"$Item.ServerRelativeUrl
-                Continue
-            }
-
-            Write-host "Processing Item:"$Item.ServerRelativeUrl
-
-            # Get the "Has Unique Permissions" Property
-            $Item.ListItemAllFields.Retrieve("HasUniqueRoleAssignments")
-            $Ctx.ExecuteQuery()
-   
-            If($Item.ListItemAllFields.HasUniqueRoleAssignments -eq $True)
-            {
-                # Reset Item Permissions
-                $Item.ListItemAllFields.ResetRoleInheritance()
-                $Ctx.ExecuteQuery()
-                Write-host -f Green "`tItem's Unique Permissions are Removed!"
-            }
-
-            # Add item to the processed items set
-            $ProcessedItems.Add($Item.ServerRelativeUrl)
-
-            # If it's a folder, recurse into it
-            If ($Item -is [Microsoft.SharePoint.Client.Folder]) {
-                Reset-SPOFolderAndFilesPermissions $Item $ProcessedItems
-            }
-
-            # Introduce a delay to avoid hitting rate limits
-            Start-Sleep -Seconds $SleepTime
+        # Check if item has unique permissions
+        If ($item.HasUniqueRoleAssignments) {
+            Write-Host "[$counter/$totalCount] Resetting unique permissions: $($itemName)" -ForegroundColor Green
+            $item.ResetRoleInheritance()
+            # Invoke-PnPQuery handles 429/503 throttling automatically with retries
+            Invoke-PnPQuery -RetryCount 10
+        }
+        Else {
+            # Already inheriting, skip
+            # Write-Host "[$counter/$totalCount] Skipping (Already inheriting): $itemName" -ForegroundColor Gray
         }
     }
     Catch {
-        write-host -f Red "Error Resetting Item Permissions!" $_.Exception.Message
+        Write-Host "[$counter/$totalCount] Error processing $($itemName): $($_.Exception.Message)" -ForegroundColor Red
 
-        # If it's a rate limit error, wait and then retry
-        if ($_.Exception.Message -like '*429*') {
-            Write-Host "Encountered 429 error. Retrying in 5 seconds..."
-            Start-Sleep -Seconds 5
-            Reset-SPOFolderAndFilesPermissions $Folder $ProcessedItems
+        # Explicit throttling check as a backup
+        If ($_.Exception.Message -like "*429*" -or $_.Exception.Message -like "*503*") {
+            Write-Host "Throttling detected. Waiting 10 seconds before continuing..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 10
         }
     }
 }
 
-# Variables
-$SiteURL = "https://SITECORP.sharepoint.com/sites/SITENAME"
-$ListName = "Documents"
-$SleepTime = 1
-
-# Get Credentials to connect
-$Username = "SITEADMIN@SITETENANT.onmicrosoft.com"
-$SecurePassword = ConvertTo-SecureString -String "APPPASSWORD" -AsPlainText -Force
-$Cred = New-Object System.Management.Automation.PSCredential($Username, $SecurePassword)
-
-
-# Setup the context
-$Ctx = New-Object Microsoft.SharePoint.Client.ClientContext($SiteURL)
-$Ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($Cred.Username, $Cred.Password)
-
-# Get the Library
-$List = $Ctx.web.Lists.GetByTitle($ListName)
-$Ctx.Load($List.RootFolder)
-$Ctx.ExecuteQuery()
-
-# Initialize the HashSet to store processed items
-$ProcessedItems = New-Object System.Collections.Generic.HashSet[String]
-
-# Call the function to reset permissions of all folders and files of the document library
-Reset-SPOFolderAndFilesPermissions $List.RootFolder $ProcessedItems
-
+Write-Host "`nTask Complete! Processed $totalCount items." -ForegroundColor Green
 pause
