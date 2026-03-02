@@ -18,17 +18,53 @@ Add-Type -AssemblyName System.Drawing
 
 $ErrorActionPreference = "Stop"
 
-# ---- CSOM DLLs ----
-# Default path for SharePoint Client components
-$csomBase = "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI"
+# ---- CSOM DLL Loader ----
+function Load-SharePointAssemblies {
+    $found = $false
+    # Common search paths for SharePoint Client SDK (Hives 15 and 16, both 64 and 32 bit)
+    $searchPaths = @(
+        "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI",
+        "C:\Program Files (x86)\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI",
+        "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\15\ISAPI",
+        "C:\Program Files (x86)\Common Files\Microsoft Shared\Web Server Extensions\15\ISAPI"
+    )
 
-if (-not (Test-Path (Join-Path $csomBase "Microsoft.SharePoint.Client.dll"))) {
-    [System.Windows.Forms.MessageBox]::Show("SharePoint Client DLLs not found at $csomBase. Please ensure SharePoint Client Components are installed.", "Error", "OK", "Error") | Out-Null
-    return
+    foreach ($path in $searchPaths) {
+        $clientDll = Join-Path $path "Microsoft.SharePoint.Client.dll"
+        $runtimeDll = Join-Path $path "Microsoft.SharePoint.Client.Runtime.dll"
+        $tenantDll = Join-Path $path "Microsoft.Online.SharePoint.Client.Tenant.dll"
+
+        if (Test-Path $clientDll) {
+            try {
+                Add-Type -Path $clientDll
+                Add-Type -Path $runtimeDll
+                if (Test-Path $tenantDll) { Add-Type -Path $tenantDll }
+                $found = $true
+                return $true
+            } catch {
+                # Try next path if load fails
+            }
+        }
+    }
+
+    # Fallback to loading by name if installed in GAC
+    if (-not $found) {
+        try {
+            Add-Type -AssemblyName "Microsoft.SharePoint.Client, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
+            Add-Type -AssemblyName "Microsoft.SharePoint.Client.Runtime, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
+            $found = $true
+            return $true
+        } catch { }
+    }
+
+    return $false
 }
 
-Add-Type -Path (Join-Path $csomBase "Microsoft.SharePoint.Client.dll")
-Add-Type -Path (Join-Path $csomBase "Microsoft.SharePoint.Client.Runtime.dll")
+if (-not (Load-SharePointAssemblies)) {
+    $msg = "SharePoint Client DLLs not found.`n`nTested paths:`n" + ($searchPaths -join "`n") + "`n`nPlease install the 'SharePoint Online Client Components SDK' and try again."
+    [System.Windows.Forms.MessageBox]::Show($msg, "Error", "OK", "Error") | Out-Null
+    return
+}
 
 # ---------------- GUI Initialization ----------------
 $form = New-Object System.Windows.Forms.Form
@@ -261,9 +297,6 @@ Register-ObjectEvent -InputObject $worker -EventName DoWork -Action {
         $qry.ViewXml = "<View Scope='RecursiveAll'><RowLimit>2000</RowLimit></View>"
         $qry.ListItemCollectionPosition = $position
         $items = $list.GetItems($qry)
-        # We also try to load if it's shared externally.
-        # Note: CSOM doesn't have a simple 'IsShared' property on ListItem, but we can look for guest users if needed.
-        # For now, we'll stick to unique permissions as the primary flag.
         $ctx.Load($items, "Include(FileRef, FileDirRef, FileLeafRef, HasUniqueRoleAssignments, FileSystemObjectType)")
         $ctx.ExecuteQuery()
         $position = $items.ListItemCollectionPosition
@@ -286,7 +319,7 @@ Register-ObjectEvent -InputObject $worker -EventName DoWork -Action {
         $leaf    = "" + $it["FileLeafRef"]
         $isFolder = $it.FileSystemObjectType -eq [Microsoft.SharePoint.Client.FileSystemObjectType]::Folder
 
-        # Skip internal SharePoint folders like "Forms"
+        # Skip internal SharePoint folders
         if ($leaf -eq "Forms" -or $leaf -eq "_t" -or $leaf -eq "_w") { continue }
 
         # Top folder logic
