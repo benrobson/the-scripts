@@ -86,8 +86,9 @@ function New-TextBox($x, $y, $w, $text = "") {
 }
 
 # Shared Data for Runspace Communication
+# We use a synchronized list to pass logs from background thread to UI thread
+$logQueue = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
 $syncHash = [hashtable]::Synchronized(@{
-    Log = ""
     Status = "Idle"
     Progress = 0
     CancelRequested = $false
@@ -226,12 +227,12 @@ function SetUiRunning([bool]$running) {
 # ---------------- Background Runspace Logic ----------------
 
 $backgroundScript = {
-    param($data, $syncHash)
+    param($data, $syncHash, $logQueue)
 
     $ErrorActionPreference = "Stop"
 
     function Log($msg) {
-        $syncHash.Log += "[$((Get-Date).ToString('HH:mm:ss'))] $msg`r`n"
+        $logQueue.Add("[$((Get-Date).ToString('HH:mm:ss'))] $msg`r`n")
     }
 
     try {
@@ -254,7 +255,7 @@ $backgroundScript = {
             Log "[INFO] Testing connection to $siteUrl..."
             $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
             $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
-            $ctx.Load($ctx.Web, "Title")
+            $ctx.Load($ctx.Web)
             $ctx.ExecuteQuery()
             Log "[SUCCESS] Connected to $($ctx.Web.Title)"
             $syncHash.Status = "Test Successful"
@@ -286,11 +287,12 @@ $backgroundScript = {
         $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
         $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
         $list = $ctx.Web.Lists.GetByTitle($libTitle)
-        $ctx.Load($list, "Title", "ItemCount", "RootFolder.ServerRelativeUrl")
+        $ctx.Load($list)
+        $ctx.Load($list.RootFolder)
         $ctx.ExecuteQuery()
         $rootUrl = $list.RootFolder.ServerRelativeUrl.TrimEnd("/")
 
-        Log "[INFO] Retrieving items (Estimated: $($list.ItemCount))..."
+        Log "[INFO] Retrieving items (Estimated: $($list.ItemCount)). This may take some time..."
         $allItems = New-Object System.Collections.Generic.List[object]
         $position = $null
         do {
@@ -299,8 +301,11 @@ $backgroundScript = {
             $qry.ViewXml = "<View Scope='RecursiveAll'><RowLimit>2000</RowLimit></View>"
             $qry.ListItemCollectionPosition = $position
             $items = $list.GetItems($qry)
-            $ctx.Load($items, "Include(FileRef, FileDirRef, FileLeafRef, HasUniqueRoleAssignments, FileSystemObjectType)")
+
+            # Note: We load properties in a way that is compatible with PowerShell 5.1 and CSOM
+            $ctx.Load($items)
             $ctx.ExecuteQuery()
+
             $position = $items.ListItemCollectionPosition
             foreach ($it in $items) { $allItems.Add($it) }
             Log "[INFO] Retrieved $($allItems.Count) items..."
@@ -315,6 +320,12 @@ $backgroundScript = {
         for ($i=0; $i -lt $total; $i++) {
             if ($syncHash.CancelRequested) { Log "[INFO] Cancellation requested."; return }
             $it = $allItems[$i]
+
+            # CSOM requires explicit retrieval of properties if not loaded.
+            # We'll use the Retrieve method which is safer in PowerShell than the 2-arg Load.
+            $it.Retrieve("FileRef", "FileDirRef", "FileLeafRef", "HasUniqueRoleAssignments", "FileSystemObjectType")
+            $ctx.ExecuteQuery()
+
             $fileRef = "" + $it["FileRef"]
             $fileDir = ("" + $it["FileDirRef"]).TrimEnd("/")
             $leaf    = "" + $it["FileLeafRef"]
@@ -368,10 +379,19 @@ $backgroundScript = {
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 200
 $timer.Add_Tick({
-    if ($syncHash.Log -ne "") {
-        $txtLog.AppendText($syncHash.Log)
-        $syncHash.Log = ""
+    # We use Monitor to safely access the synchronized list
+    if ($logQueue.Count -gt 0) {
+        [System.Threading.Monitor]::Enter($logQueue.SyncRoot)
+        try {
+            $logs = ""
+            foreach ($l in $logQueue) { $logs += $l }
+            $logQueue.Clear()
+            $txtLog.AppendText($logs)
+        } finally {
+            [System.Threading.Monitor]::Exit($logQueue.SyncRoot)
+        }
     }
+
     $lblStatus.Text = $syncHash.Status
     $progress.Value = $syncHash.Progress
 
@@ -395,11 +415,11 @@ $btnStart.Add_Click({
     }
     $syncHash.Progress = 0
     $syncHash.Status = "Starting..."
-    $syncHash.Log = ""
     $syncHash.CancelRequested = $false
     $syncHash.Result = $null
     $syncHash.Error = $null
     $syncHash.Completed = $false
+    $logQueue.Clear()
     $txtLog.Clear()
     SetUiRunning $true
 
@@ -408,7 +428,8 @@ $btnStart.Add_Click({
     $runspace = [runspacefactory]::CreateRunspace()
     $runspace.Open()
     $runspace.SessionStateProxy.SetVariable("syncHash", $syncHash)
-    $powershell = [PowerShell]::Create().AddScript($backgroundScript).AddArgument($data).AddArgument($syncHash)
+    $runspace.SessionStateProxy.SetVariable("logQueue", $logQueue)
+    $powershell = [PowerShell]::Create().AddScript($backgroundScript).AddArgument($data).AddArgument($syncHash).AddArgument($logQueue)
     $powershell.Runspace = $runspace
     $powershell.BeginInvoke()
     $timer.Start()
@@ -420,9 +441,9 @@ $btnTest.Add_Click({
     }
     $syncHash.Progress = 0
     $syncHash.Status = "Testing Connection..."
-    $syncHash.Log = ""
     $syncHash.CancelRequested = $false
     $syncHash.Completed = $false
+    $logQueue.Clear()
     SetUiRunning $true
 
     $data = @{ SiteUrl = $txtSite.Text.Trim(); Username = $txtUser.Text.Trim(); Password = $txtPass.Text; IsTest = $true }
@@ -430,7 +451,8 @@ $btnTest.Add_Click({
     $runspace = [runspacefactory]::CreateRunspace()
     $runspace.Open()
     $runspace.SessionStateProxy.SetVariable("syncHash", $syncHash)
-    $powershell = [PowerShell]::Create().AddScript($backgroundScript).AddArgument($data).AddArgument($syncHash)
+    $runspace.SessionStateProxy.SetVariable("logQueue", $logQueue)
+    $powershell = [PowerShell]::Create().AddScript($backgroundScript).AddArgument($data).AddArgument($syncHash).AddArgument($logQueue)
     $powershell.Runspace = $runspace
     $powershell.BeginInvoke()
     $timer.Start()
