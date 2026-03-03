@@ -8,9 +8,8 @@
     - Compatible with PowerShell 5.1 and uses CSOM (Username + App Password)
 
 .DESCRIPTION
-    This script provides a GUI to manage SharePoint Online permissions. It can perform a 'Dry Run' to
-    audit unique permissions and item counts, or a 'Reset' run to remove unique permissions from
-    folders and files in a specified library.
+    This script provides a GUI to manage SharePoint Online permissions. It uses Runspaces
+    to ensure the UI remains responsive during long-running operations.
 #>
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -21,7 +20,6 @@ $ErrorActionPreference = "Stop"
 # ---- CSOM DLL Loader ----
 function Load-SharePointAssemblies {
     $found = $false
-    # Common search paths for SharePoint Client SDK (Hives 15 and 16, both 64 and 32 bit)
     $searchPaths = @(
         "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI",
         "C:\Program Files (x86)\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI",
@@ -41,13 +39,10 @@ function Load-SharePointAssemblies {
                 if (Test-Path $tenantDll) { Add-Type -Path $tenantDll }
                 $found = $true
                 return $true
-            } catch {
-                # Try next path if load fails
-            }
+            } catch { }
         }
     }
 
-    # Fallback to loading by name if installed in GAC
     if (-not $found) {
         try {
             Add-Type -AssemblyName "Microsoft.SharePoint.Client, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
@@ -56,20 +51,18 @@ function Load-SharePointAssemblies {
             return $true
         } catch { }
     }
-
     return $false
 }
 
 if (-not (Load-SharePointAssemblies)) {
-    $msg = "SharePoint Client DLLs not found.`n`nTested paths:`n" + ($searchPaths -join "`n") + "`n`nPlease install the 'SharePoint Online Client Components SDK' and try again."
-    [System.Windows.Forms.MessageBox]::Show($msg, "Error", "OK", "Error") | Out-Null
+    [System.Windows.Forms.MessageBox]::Show("SharePoint Client DLLs not found. Please install SharePoint Online Client Components SDK.", "Error", "OK", "Error") | Out-Null
     return
 }
 
 # ---------------- GUI Initialization ----------------
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "SPO Permissions Manager (CSOM)"
-$form.Size = New-Object System.Drawing.Size(980, 800)
+$form.Size = New-Object System.Drawing.Size(980, 850)
 $form.StartPosition = "CenterScreen"
 
 $font = New-Object System.Drawing.Font("Segoe UI", 9)
@@ -92,12 +85,17 @@ function New-TextBox($x, $y, $w, $text = "") {
     $t
 }
 
-function UiLog([string]$msg) {
-    $time = (Get-Date).ToString("HH:mm:ss")
-    $txtLog.AppendText("[$time] $msg`r`n")
-    $txtLog.SelectionStart = $txtLog.Text.Length
-    $txtLog.ScrollToCaret()
-}
+# Shared Data for Runspace Communication
+$syncHash = [hashtable]::Synchronized(@{
+    Log = ""
+    Status = "Idle"
+    Progress = 0
+    CancelRequested = $false
+    IsRunning = $false
+    Result = $null
+    Error = $null
+    Completed = $false
+})
 
 # Inputs
 $form.Controls.Add((New-Label "Site URL" 10 10))
@@ -161,22 +159,28 @@ $numSleep.Value = 1
 $form.Controls.Add($numSleep)
 
 # Buttons
+$btnTest = New-Object System.Windows.Forms.Button
+$btnTest.Text = "Test Connection"
+$btnTest.Location = New-Object System.Drawing.Point(10, 280)
+$btnTest.Size = New-Object System.Drawing.Size(155, 32)
+$form.Controls.Add($btnTest)
+
 $btnStart = New-Object System.Windows.Forms.Button
 $btnStart.Text = "Start Process"
-$btnStart.Location = New-Object System.Drawing.Point(10, 280)
+$btnStart.Location = New-Object System.Drawing.Point(175, 280)
 $btnStart.Size = New-Object System.Drawing.Size(155, 32)
 $form.Controls.Add($btnStart)
 
 $btnCancel = New-Object System.Windows.Forms.Button
 $btnCancel.Text = "Cancel"
-$btnCancel.Location = New-Object System.Drawing.Point(175, 280)
+$btnCancel.Location = New-Object System.Drawing.Point(10, 320)
 $btnCancel.Size = New-Object System.Drawing.Size(155, 32)
 $btnCancel.Enabled = $false
 $form.Controls.Add($btnCancel)
 
 $progress = New-Object System.Windows.Forms.ProgressBar
-$progress.Location = New-Object System.Drawing.Point(340, 286)
-$progress.Size = New-Object System.Drawing.Size(615, 20)
+$progress.Location = New-Object System.Drawing.Point(175, 326)
+$progress.Size = New-Object System.Drawing.Size(780, 20)
 $progress.Minimum = 0
 $progress.Maximum = 100
 $progress.Value = 0
@@ -184,14 +188,14 @@ $form.Controls.Add($progress)
 
 $lblStatus = New-Object System.Windows.Forms.Label
 $lblStatus.Text = "Idle"
-$lblStatus.Location = New-Object System.Drawing.Point(340, 308)
-$lblStatus.Size = New-Object System.Drawing.Size(615, 20)
+$lblStatus.Location = New-Object System.Drawing.Point(175, 348)
+$lblStatus.Size = New-Object System.Drawing.Size(780, 20)
 $form.Controls.Add($lblStatus)
 
 # Log
 $txtLog = New-Object System.Windows.Forms.TextBox
-$txtLog.Location = New-Object System.Drawing.Point(10, 340)
-$txtLog.Size = New-Object System.Drawing.Size(945, 400)
+$txtLog.Location = New-Object System.Drawing.Point(10, 380)
+$txtLog.Size = New-Object System.Drawing.Size(945, 410)
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.ReadOnly = $true
@@ -201,13 +205,12 @@ $form.Controls.Add($txtLog)
 $folderDlg = New-Object System.Windows.Forms.FolderBrowserDialog
 
 $btnBrowse.Add_Click({
-    if ($folderDlg.ShowDialog() -eq "OK") {
-        $txtOut.Text = $folderDlg.SelectedPath
-    }
+    if ($folderDlg.ShowDialog() -eq "OK") { $txtOut.Text = $folderDlg.SelectedPath }
 })
 
 function SetUiRunning([bool]$running) {
     $btnStart.Enabled = -not $running
+    $btnTest.Enabled = -not $running
     $btnCancel.Enabled = $running
     $txtSite.Enabled = -not $running
     $txtLib.Enabled = -not $running
@@ -220,40 +223,53 @@ function SetUiRunning([bool]$running) {
     $grpMode.Enabled = -not $running
 }
 
-# ---------------- Background Worker ----------------
-$worker = New-Object System.ComponentModel.BackgroundWorker
-$worker.WorkerReportsProgress = $true
-$worker.WorkerSupportsCancellation = $true
+# ---------------- Background Runspace Logic ----------------
 
-# Register-ObjectEvent is used for compatibility with StrictMode and PS 5.1
-Get-EventSubscriber | Where-Object { $_.SourceObject -eq $worker } | Unregister-Event -Force -ErrorAction SilentlyContinue
+$backgroundScript = {
+    param($data, $syncHash)
 
-Register-ObjectEvent -InputObject $worker -EventName DoWork -Action {
-    $a = $EventArgs.Argument
-    $siteUrl  = $a.SiteUrl
-    $libTitle = $a.Library
-    $user     = $a.Username
-    $pass     = $a.Password
-    $adminUrl = $a.AdminUrl
-    $out      = $a.Output
-    $sleepSec = [int]$a.SleepSec
-    $isDryRun = [bool]$a.IsDryRun
+    $ErrorActionPreference = "Stop"
 
-    New-Item -ItemType Directory -Force -Path $out | Out-Null
-    $ts = Get-Date -Format "yyyyMMdd-HHmmss"
-    $flagCsv   = Join-Path $out "permissions-flagged-items-$ts.csv"
-    $countCsv  = Join-Path $out "folder-counts-$ts.csv"
-    $summaryJs = Join-Path $out "summary-$ts.json"
-
-    $worker.ReportProgress(0, @{type="log"; msg="[INFO] Connecting to SharePoint..."})
-
-    $sharingCapability = "Unknown"
-    $secure = ConvertTo-SecureString -String $pass -AsPlainText -Force
+    function Log($msg) {
+        $syncHash.Log += "[$((Get-Date).ToString('HH:mm:ss'))] $msg`r`n"
+    }
 
     try {
-        # Check External Sharing Capability if Admin URL is provided
+        $syncHash.IsRunning = $true
+        Log "[INFO] Background process started."
+
+        $siteUrl  = $data.SiteUrl
+        $libTitle = $data.Library
+        $user     = $data.Username
+        $pass     = $data.Password
+        $adminUrl = $data.AdminUrl
+        $out      = $data.Output
+        $sleepSec = [int]$data.SleepSec
+        $isDryRun = [bool]$data.IsDryRun
+        $isTest   = [bool]$data.IsTest
+
+        $secure = ConvertTo-SecureString -String $pass -AsPlainText -Force
+
+        if ($isTest) {
+            Log "[INFO] Testing connection to $siteUrl..."
+            $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
+            $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
+            $ctx.Load($ctx.Web, "Title")
+            $ctx.ExecuteQuery()
+            Log "[SUCCESS] Connected to $($ctx.Web.Title)"
+            $syncHash.Status = "Test Successful"
+            return
+        }
+
+        New-Item -ItemType Directory -Force -Path $out | Out-Null
+        $ts = Get-Date -Format "yyyyMMdd-HHmmss"
+        $flagCsv   = Join-Path $out "permissions-flagged-items-$ts.csv"
+        $countCsv  = Join-Path $out "folder-counts-$ts.csv"
+        $summaryJs = Join-Path $out "summary-$ts.json"
+
+        $sharingCapability = "Unknown"
         if (-not [string]::IsNullOrWhiteSpace($adminUrl)) {
-            $worker.ReportProgress(0, @{type="log"; msg="[INFO] Connecting to Tenant Admin to check Sharing Capability..."})
+            Log "[INFO] Checking Sharing Capability via Tenant Admin..."
             try {
                 $adminCtx = New-Object Microsoft.SharePoint.Client.ClientContext($adminUrl)
                 $adminCtx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
@@ -262,219 +278,167 @@ Register-ObjectEvent -InputObject $worker -EventName DoWork -Action {
                 $adminCtx.Load($siteProperties)
                 $adminCtx.ExecuteQuery()
                 $sharingCapability = $siteProperties.SharingCapability.ToString()
-                $worker.ReportProgress(0, @{type="log"; msg=("[INFO] Site Sharing Capability: " + $sharingCapability)})
-            } catch {
-                $worker.ReportProgress(0, @{type="log"; msg=("[WARN] Failed to check Sharing Capability: " + $_.Exception.Message)})
-                # Continue anyway, as this is an optional check
-            }
+                Log "[INFO] Site Sharing Capability: $sharingCapability"
+            } catch { Log "[WARN] Failed to check Sharing Capability: $($_.Exception.Message)" }
         }
 
+        Log "[INFO] Connecting to Library $libTitle..."
         $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
         $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
-
-        $web = $ctx.Web
-        $ctx.Load($web, "Title", "Url")
-        $list = $web.Lists.GetByTitle($libTitle)
-        $ctx.Load($list, "Title", "ItemCount")
-        $ctx.Load($list.RootFolder, "ServerRelativeUrl")
+        $list = $ctx.Web.Lists.GetByTitle($libTitle)
+        $ctx.Load($list, "Title", "ItemCount", "RootFolder.ServerRelativeUrl")
         $ctx.ExecuteQuery()
-
         $rootUrl = $list.RootFolder.ServerRelativeUrl.TrimEnd("/")
-        $worker.ReportProgress(2, @{type="log"; msg=("[INFO] Connected to {0}" -f $web.Title)})
-        $worker.ReportProgress(2, @{type="log"; msg=("[INFO] Library '{0}' has approximately {1} items." -f $libTitle, $list.ItemCount)})
-    } catch {
-        $worker.ReportProgress(0, @{type="log"; msg=("[ERROR] Connection failed: " + $_.Exception.Message)})
-        throw $_.Exception
-    }
 
-    $worker.ReportProgress(5, @{type="status"; msg="Retrieving items..."})
+        Log "[INFO] Retrieving items (Estimated: $($list.ItemCount))..."
+        $allItems = New-Object System.Collections.Generic.List[object]
+        $position = $null
+        do {
+            if ($syncHash.CancelRequested) { Log "[INFO] Cancellation requested."; return }
+            $qry = New-Object Microsoft.SharePoint.Client.CamlQuery
+            $qry.ViewXml = "<View Scope='RecursiveAll'><RowLimit>2000</RowLimit></View>"
+            $qry.ListItemCollectionPosition = $position
+            $items = $list.GetItems($qry)
+            $ctx.Load($items, "Include(FileRef, FileDirRef, FileLeafRef, HasUniqueRoleAssignments, FileSystemObjectType)")
+            $ctx.ExecuteQuery()
+            $position = $items.ListItemCollectionPosition
+            foreach ($it in $items) { $allItems.Add($it) }
+            Log "[INFO] Retrieved $($allItems.Count) items..."
+            $syncHash.Status = "Retrieved $($allItems.Count) items"
+        } while ($position -ne $null)
 
-    $allItems = New-Object System.Collections.Generic.List[object]
-    $position = $null
-    do {
-        if ($worker.CancellationPending) { $EventArgs.Cancel = $true; return }
-        $qry = New-Object Microsoft.SharePoint.Client.CamlQuery
-        $qry.ViewXml = "<View Scope='RecursiveAll'><RowLimit>2000</RowLimit></View>"
-        $qry.ListItemCollectionPosition = $position
-        $items = $list.GetItems($qry)
-        $ctx.Load($items, "Include(FileRef, FileDirRef, FileLeafRef, HasUniqueRoleAssignments, FileSystemObjectType)")
-        $ctx.ExecuteQuery()
-        $position = $items.ListItemCollectionPosition
-        foreach ($it in $items) { $allItems.Add($it) }
-        $worker.ReportProgress(5, @{type="log"; msg=("[INFO] Retrieved {0} items..." -f $allItems.Count)})
-    } while ($position -ne $null)
+        $total = $allItems.Count
+        $folderCounts = @{}
+        $flagged = New-Object System.Collections.Generic.List[object]
 
-    $total = $allItems.Count
-    $folderCounts = @{}
-    $flagged = New-Object System.Collections.Generic.List[object]
+        Log "[INFO] Processing $total items..."
+        for ($i=0; $i -lt $total; $i++) {
+            if ($syncHash.CancelRequested) { Log "[INFO] Cancellation requested."; return }
+            $it = $allItems[$i]
+            $fileRef = "" + $it["FileRef"]
+            $fileDir = ("" + $it["FileDirRef"]).TrimEnd("/")
+            $leaf    = "" + $it["FileLeafRef"]
+            $isFolder = $it.FileSystemObjectType -eq [Microsoft.SharePoint.Client.FileSystemObjectType]::Folder
 
-    $worker.ReportProgress(10, @{type="status"; msg=("Processing {0} items..." -f $total)})
+            if ($leaf -eq "Forms" -or $leaf -eq "_t" -or $leaf -eq "_w") { continue }
 
-    for ($i=0; $i -lt $total; $i++) {
-        if ($worker.CancellationPending) { $EventArgs.Cancel = $true; return }
-        $it = $allItems[$i]
-
-        $fileRef = "" + $it["FileRef"]
-        $fileDir = ("" + $it["FileDirRef"]).TrimEnd("/")
-        $leaf    = "" + $it["FileLeafRef"]
-        $isFolder = $it.FileSystemObjectType -eq [Microsoft.SharePoint.Client.FileSystemObjectType]::Folder
-
-        # Skip internal SharePoint folders
-        if ($leaf -eq "Forms" -or $leaf -eq "_t" -or $leaf -eq "_w") { continue }
-
-        # Top folder logic
-        $topFolder = "(root)"
-        if ($fileDir -eq $rootUrl -or [string]::IsNullOrWhiteSpace($fileDir)) {
             $topFolder = "(root)"
-        } elseif ($fileDir.StartsWith($rootUrl + "/")) {
-            $rest = $fileDir.Substring($rootUrl.Length + 1)
-            $topFolder = $rest.Split("/")[0]
-            if ([string]::IsNullOrWhiteSpace($topFolder)) { $topFolder = "(root)" }
-        } else {
-            $topFolder = "(outside-root?)"
-        }
+            if ($fileDir -eq $rootUrl -or [string]::IsNullOrWhiteSpace($fileDir)) { $topFolder = "(root)" }
+            elseif ($fileDir.StartsWith($rootUrl + "/")) {
+                $topFolder = $fileDir.Substring($rootUrl.Length + 1).Split("/")[0]
+                if ([string]::IsNullOrWhiteSpace($topFolder)) { $topFolder = "(root)" }
+            } else { $topFolder = "(outside-root?)" }
 
-        if (-not $folderCounts.ContainsKey($topFolder)) { $folderCounts[$topFolder] = 0 }
-        $folderCounts[$topFolder]++
+            if (-not $folderCounts.ContainsKey($topFolder)) { $folderCounts[$topFolder] = 0 }
+            $folderCounts[$topFolder]++
 
-        $hasUnique = [bool]$it.HasUniqueRoleAssignments
-        if ($hasUnique) {
-            if (-not $isDryRun) {
-                $worker.ReportProgress(-1, @{type="log"; msg=("[ACTION] Resetting permissions on: $fileRef")})
-                $retryCount = 0
-                $maxRetries = 3
-                $success = $false
-                while (-not $success -and $retryCount -lt $maxRetries) {
-                    try {
-                        $it.ResetRoleInheritance()
-                        $ctx.ExecuteQuery()
-                        $success = $true
-                    } catch {
-                        if ($_.Exception.Message -like '*429*') {
-                            $retryCount++
-                            $worker.ReportProgress(-1, @{type="log"; msg=("[WARN] Throttled (429). Retrying in 5 seconds... (Attempt $retryCount)")})
-                            Start-Sleep -Seconds 5
-                        } else {
-                            $worker.ReportProgress(-1, @{type="log"; msg=("[ERROR] Failed to reset $fileRef : " + $_.Exception.Message)})
-                            break
-                        }
-                    }
+            if ([bool]$it.HasUniqueRoleAssignments) {
+                if (-not $isDryRun) {
+                    Log "[ACTION] Resetting $fileRef"
+                    $it.ResetRoleInheritance()
+                    $ctx.ExecuteQuery()
                 }
+                $flagged.Add([pscustomobject]@{ Url = $fileRef; Name = $leaf; Type = if ($isFolder) { "Folder" } else { "File" }; TopFolder = $topFolder; HasUniquePermissions = $true; Status = if ($isDryRun) { "Detected" } else { "Reset" } })
             }
 
-            $flagged.Add([pscustomobject]@{
-                Url = $fileRef
-                Name = $leaf
-                Type = if ($isFolder) { "Folder" } else { "File" }
-                TopFolder = $topFolder
-                HasUniquePermissions = $true
-                Status = if ($isDryRun) { "Detected" } else { "Reset" }
-            })
+            if ($sleepSec -gt 0 -and $it.HasUniqueRoleAssignments) { Start-Sleep -Seconds $sleepSec }
+
+            $syncHash.Progress = [int](10 + (90 * ($i / $total)))
+            $syncHash.Status = "Processing $i / $total"
         }
 
-        if ($sleepSec -gt 0 -and $hasUnique) { Start-Sleep -Seconds $sleepSec }
+        Log "[INFO] Exporting reports..."
+        $flagged | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $flagCsv
+        $folderCounts.GetEnumerator() | Sort-Object Name | ForEach-Object { [pscustomobject]@{ TopLevelFolder = $_.Name; ItemCount = $_.Value } } | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $countCsv
 
-        if (($i % 100) -eq 0 -or $i -eq ($total - 1)) {
-            $pct = 10 + [int](85 * (($i+1) / [double]$total))
-            if ($pct -gt 95) { $pct = 95 }
-            $worker.ReportProgress($pct, @{type="status"; msg=("Processed {0}/{1}" -f ($i+1), $total)})
-        }
+        $summary = @{ Timestamp = (Get-Date).ToString("o"); SiteUrl = $siteUrl; Library = $libTitle; SharingCapability = $sharingCapability; TotalItemsScanned = $total; UniquePermissionsFound = $flagged.Count; Mode = if ($isDryRun) { "Dry Run" } else { "Reset" }; Outputs = @{ FlaggedItemsCsv = $flagCsv; FolderCountsCsv = $countCsv } }
+        $summary | ConvertTo-Json -Depth 6 | Out-File -Encoding UTF8 -FilePath $summaryJs
+        $syncHash.Result = $summary
+        Log "[INFO] Completed successfully."
+    } catch {
+        Log "[ERROR] $($_.Exception.Message)"
+        $syncHash.Error = $_.Exception.Message
+    } finally {
+        $syncHash.IsRunning = $false
+        $syncHash.Completed = $true
     }
+}
 
-    $worker.ReportProgress(96, @{type="status"; msg="Exporting reports..."})
-    $flagged | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $flagCsv
-    $folderCounts.GetEnumerator() | Sort-Object Name | ForEach-Object {
-        [pscustomobject]@{
-            TopLevelFolder = $_.Name
-            ItemCount = $_.Value
-        }
-    } | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $countCsv
-
-    $summary = [pscustomobject]@{
-        Timestamp = (Get-Date).ToString("o")
-        SiteUrl = $siteUrl
-        Library = $libTitle
-        SharingCapability = $sharingCapability
-        TotalItemsScanned = $total
-        UniquePermissionsFound = $flagged.Count
-        Mode = if ($isDryRun) { "Dry Run" } else { "Reset" }
-        Outputs = @{
-            FlaggedItemsCsv = $flagCsv
-            FolderCountsCsv = $countCsv
-        }
+# ---------------- UI Timer to update from SyncHash ----------------
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 200
+$timer.Add_Tick({
+    if ($syncHash.Log -ne "") {
+        $txtLog.AppendText($syncHash.Log)
+        $syncHash.Log = ""
     }
-    $summary | ConvertTo-Json -Depth 6 | Out-File -Encoding UTF8 -FilePath $summaryJs
+    $lblStatus.Text = $syncHash.Status
+    $progress.Value = $syncHash.Progress
 
-    $worker.ReportProgress(100, @{type="log"; msg=("[INFO] Done. Items flagged/processed: {0}" -f $flagged.Count)})
-    $EventArgs.Result = $summary
-} | Out-Null
-
-Register-ObjectEvent -InputObject $worker -EventName ProgressChanged -Action {
-    $payload = $EventArgs.UserState
-    $pct = $EventArgs.ProgressPercentage
-    $form.BeginInvoke([Action]{
-        if ($payload -and $payload.type -eq "log") { UiLog $payload.msg }
-        if ($payload -and $payload.type -eq "status") { $lblStatus.Text = $payload.msg }
-        if ($pct -ge 0 -and $pct -le 100) { $progress.Value = $pct }
-    }) | Out-Null
-} | Out-Null
-
-Register-ObjectEvent -InputObject $worker -EventName RunWorkerCompleted -Action {
-    $form.BeginInvoke([Action]{
+    if ($syncHash.Completed) {
+        $timer.Stop()
+        $syncHash.Completed = $false
         SetUiRunning $false
-        if ($EventArgs.Error) {
-            $lblStatus.Text = "Failed"
-            $progress.Value = 0
-            UiLog ("[ERROR] " + $EventArgs.Error.Exception.Message)
-            [System.Windows.Forms.MessageBox]::Show("Process failed:`r`n$($EventArgs.Error.Exception.Message)", "Error", "OK", "Error") | Out-Null
-        } elseif ($EventArgs.Cancelled) {
-            $lblStatus.Text = "Cancelled"
-            $progress.Value = 0
-            UiLog "[INFO] Cancelled by user."
-        } else {
-            $summary = $EventArgs.Result
-            $lblStatus.Text = "Completed"
-            $progress.Value = 100
-            UiLog "[INFO] Completed successfully."
-            [System.Windows.Forms.MessageBox]::Show("Process completed.`r`nSharing Capability: $($summary.SharingCapability)`r`nItems with unique permissions: $($summary.UniquePermissionsFound)`r`nCheck output folder for reports.", "Done", "OK", "Information") | Out-Null
+        if ($syncHash.Error) {
+            [System.Windows.Forms.MessageBox]::Show("Error: $($syncHash.Error)", "Error", "OK", "Error") | Out-Null
+        } elseif ($syncHash.Status -eq "Test Successful") {
+            [System.Windows.Forms.MessageBox]::Show("Test Connection Successful!", "Success") | Out-Null
+        } elseif ($syncHash.Result) {
+            [System.Windows.Forms.MessageBox]::Show("Process completed.`n`nFound $($syncHash.Result.UniquePermissionsFound) items with unique permissions.", "Done") | Out-Null
         }
-    }) | Out-Null
-} | Out-Null
-
-# ---------------- Event Handlers ----------------
-$btnStart.Add_Click({
-    $site = $txtSite.Text.Trim()
-    $user = $txtUser.Text.Trim()
-    $pass = $txtPass.Text
-    if ([string]::IsNullOrWhiteSpace($site) -or [string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrWhiteSpace($pass)) {
-        [System.Windows.Forms.MessageBox]::Show("Please fill Site URL, Username, and App Password.", "Input Missing") | Out-Null
-        return
     }
+})
 
+$btnStart.Add_Click({
+    if ([string]::IsNullOrWhiteSpace($txtSite.Text) -or [string]::IsNullOrWhiteSpace($txtUser.Text) -or [string]::IsNullOrWhiteSpace($txtPass.Text)) {
+        [System.Windows.Forms.MessageBox]::Show("Please fill Site URL, Username, and App Password.") | Out-Null; return
+    }
+    $syncHash.Progress = 0
+    $syncHash.Status = "Starting..."
+    $syncHash.Log = ""
+    $syncHash.CancelRequested = $false
+    $syncHash.Result = $null
+    $syncHash.Error = $null
+    $syncHash.Completed = $false
     $txtLog.Clear()
-    $progress.Value = 0
-    $lblStatus.Text = "Starting..."
     SetUiRunning $true
-    UiLog "[INFO] Starting process..."
 
-    $worker.RunWorkerAsync(@{
-        SiteUrl = $site
-        Library = $txtLib.Text.Trim()
-        Username = $user
-        Password = $pass
-        AdminUrl = $txtAdmin.Text.Trim()
-        Output   = $txtOut.Text.Trim()
-        SleepSec = [int]$numSleep.Value
-        IsDryRun = $rbDryRun.Checked
-    })
+    $data = @{ SiteUrl = $txtSite.Text.Trim(); Library = $txtLib.Text.Trim(); Username = $txtUser.Text.Trim(); Password = $txtPass.Text; AdminUrl = $txtAdmin.Text.Trim(); Output = $txtOut.Text.Trim(); SleepSec = $numSleep.Value; IsDryRun = $rbDryRun.Checked; IsTest = $false }
+
+    $runspace = [runspacefactory]::CreateRunspace()
+    $runspace.Open()
+    $runspace.SessionStateProxy.SetVariable("syncHash", $syncHash)
+    $powershell = [PowerShell]::Create().AddScript($backgroundScript).AddArgument($data).AddArgument($syncHash)
+    $powershell.Runspace = $runspace
+    $powershell.BeginInvoke()
+    $timer.Start()
+})
+
+$btnTest.Add_Click({
+    if ([string]::IsNullOrWhiteSpace($txtSite.Text) -or [string]::IsNullOrWhiteSpace($txtUser.Text) -or [string]::IsNullOrWhiteSpace($txtPass.Text)) {
+        [System.Windows.Forms.MessageBox]::Show("Please fill Site URL, Username, and App Password.") | Out-Null; return
+    }
+    $syncHash.Progress = 0
+    $syncHash.Status = "Testing Connection..."
+    $syncHash.Log = ""
+    $syncHash.CancelRequested = $false
+    $syncHash.Completed = $false
+    SetUiRunning $true
+
+    $data = @{ SiteUrl = $txtSite.Text.Trim(); Username = $txtUser.Text.Trim(); Password = $txtPass.Text; IsTest = $true }
+
+    $runspace = [runspacefactory]::CreateRunspace()
+    $runspace.Open()
+    $runspace.SessionStateProxy.SetVariable("syncHash", $syncHash)
+    $powershell = [PowerShell]::Create().AddScript($backgroundScript).AddArgument($data).AddArgument($syncHash)
+    $powershell.Runspace = $runspace
+    $powershell.BeginInvoke()
+    $timer.Start()
 })
 
 $btnCancel.Add_Click({
-    if ($worker.IsBusy) {
-        UiLog "[INFO] Cancel requested..."
-        $worker.CancelAsync()
-    }
+    $syncHash.CancelRequested = $true
+    $lblStatus.Text = "Cancellation Requested..."
 })
 
-SetUiRunning $false
 [void]$form.ShowDialog()
