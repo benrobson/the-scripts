@@ -9,7 +9,7 @@
 
 .DESCRIPTION
     This script provides a GUI to manage SharePoint Online permissions. It uses Runspaces
-    to ensure the UI remains responsive during long-running operations.
+    in STA mode to ensure UI responsiveness and compatibility with SPO authentication.
 #>
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -29,14 +29,12 @@ function Load-SharePointAssemblies {
 
     foreach ($path in $searchPaths) {
         $clientDll = Join-Path $path "Microsoft.SharePoint.Client.dll"
-        $runtimeDll = Join-Path $path "Microsoft.SharePoint.Client.Runtime.dll"
-        $tenantDll = Join-Path $path "Microsoft.Online.SharePoint.Client.Tenant.dll"
-
         if (Test-Path $clientDll) {
             try {
-                Add-Type -Path $clientDll
-                Add-Type -Path $runtimeDll
-                if (Test-Path $tenantDll) { Add-Type -Path $tenantDll }
+                Add-Type -Path $clientDll -ErrorAction SilentlyContinue
+                Add-Type -Path (Join-Path $path "Microsoft.SharePoint.Client.Runtime.dll") -ErrorAction SilentlyContinue
+                $tenantDll = Join-Path $path "Microsoft.Online.SharePoint.Client.Tenant.dll"
+                if (Test-Path $tenantDll) { Add-Type -Path $tenantDll -ErrorAction SilentlyContinue }
                 $found = $true
                 return $true
             } catch { }
@@ -86,7 +84,6 @@ function New-TextBox($x, $y, $w, $text = "") {
 }
 
 # Shared Data for Runspace Communication
-# We use a synchronized list to pass logs from background thread to UI thread
 $logQueue = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
 $syncHash = [hashtable]::Synchronized(@{
     Status = "Idle"
@@ -150,7 +147,7 @@ $rbReset.Location = New-Object System.Drawing.Point(150, 25)
 $rbReset.AutoSize = $true
 $grpMode.Controls.Add($rbReset)
 
-$form.Controls.Add((New-Label "Sleep (sec) between items" 320 210))
+$form.Controls.Add((New-Label "Sleep (sec) between items (only if unique)" 320 210))
 $numSleep = New-Object System.Windows.Forms.NumericUpDown
 $numSleep.Location = New-Object System.Drawing.Point(320, 235)
 $numSleep.Size = New-Object System.Drawing.Size(100, 22)
@@ -235,9 +232,50 @@ $backgroundScript = {
         $logQueue.Add("[$((Get-Date).ToString('HH:mm:ss'))] $msg`r`n")
     }
 
+    function Execute-QueryWithRetry($context) {
+        $retry = $true
+        $retryCount = 0
+        while ($retry -and $retryCount -lt 3) {
+            try {
+                $context.ExecuteQuery()
+                $retry = $false
+            } catch {
+                if ($_.Exception.Message -like "*429*" -or $_.Exception.Message -like "*503*") {
+                    $retryCount++
+                    Log "[WARN] Throttled (429/503). Waiting 5 seconds... (Attempt $retryCount)"
+                    Start-Sleep -Seconds 5
+                } else { throw }
+            }
+        }
+    }
+
+    # Runspaces do not inherit loaded assemblies.
+    function Load-Assemblies-Internal {
+        $searchPaths = @(
+            "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI",
+            "C:\Program Files (x86)\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI",
+            "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\15\ISAPI",
+            "C:\Program Files (x86)\Common Files\Microsoft Shared\Web Server Extensions\15\ISAPI"
+        )
+        foreach ($path in $searchPaths) {
+            $clientDll = Join-Path $path "Microsoft.SharePoint.Client.dll"
+            if (Test-Path $clientDll) {
+                Add-Type -Path $clientDll -ErrorAction SilentlyContinue
+                Add-Type -Path (Join-Path $path "Microsoft.SharePoint.Client.Runtime.dll") -ErrorAction SilentlyContinue
+                $tenantDll = Join-Path $path "Microsoft.Online.SharePoint.Client.Tenant.dll"
+                if (Test-Path $tenantDll) { Add-Type -Path $tenantDll -ErrorAction SilentlyContinue }
+                return $true
+            }
+        }
+        Add-Type -AssemblyName "Microsoft.SharePoint.Client, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
+        Add-Type -AssemblyName "Microsoft.SharePoint.Client.Runtime, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
+        return $true
+    }
+
     try {
         $syncHash.IsRunning = $true
         Log "[INFO] Background process started."
+        Load-Assemblies-Internal | Out-Null
 
         $siteUrl  = $data.SiteUrl
         $libTitle = $data.Library
@@ -256,8 +294,8 @@ $backgroundScript = {
             $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
             $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
             $ctx.Load($ctx.Web)
-            $ctx.ExecuteQuery()
-            Log "[SUCCESS] Connected to $($ctx.Web.Title)"
+            Execute-QueryWithRetry $ctx
+            Log "[SUCCESS] Connected to site: $($ctx.Web.Title)"
             $syncHash.Status = "Test Successful"
             return
         }
@@ -277,22 +315,22 @@ $backgroundScript = {
                 $tenant = New-Object Microsoft.Online.SharePoint.TenantAdministration.Tenant($adminCtx)
                 $siteProperties = $tenant.GetSitePropertiesByUrl($siteUrl, $true)
                 $adminCtx.Load($siteProperties)
-                $adminCtx.ExecuteQuery()
+                Execute-QueryWithRetry $adminCtx
                 $sharingCapability = $siteProperties.SharingCapability.ToString()
                 Log "[INFO] Site Sharing Capability: $sharingCapability"
             } catch { Log "[WARN] Failed to check Sharing Capability: $($_.Exception.Message)" }
         }
 
-        Log "[INFO] Connecting to Library $libTitle..."
+        Log "[INFO] Connecting to Library: $libTitle..."
         $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
         $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
         $list = $ctx.Web.Lists.GetByTitle($libTitle)
         $ctx.Load($list)
         $ctx.Load($list.RootFolder)
-        $ctx.ExecuteQuery()
+        Execute-QueryWithRetry $ctx
         $rootUrl = $list.RootFolder.ServerRelativeUrl.TrimEnd("/")
 
-        Log "[INFO] Retrieving items (Estimated: $($list.ItemCount)). This may take some time..."
+        Log "[INFO] Enumerate items (Recursive)..."
         $allItems = New-Object System.Collections.Generic.List[object]
         $position = $null
         do {
@@ -302,9 +340,9 @@ $backgroundScript = {
             $qry.ListItemCollectionPosition = $position
             $items = $list.GetItems($qry)
 
-            # Note: We load properties in a way that is compatible with PowerShell 5.1 and CSOM
-            $ctx.Load($items)
-            $ctx.ExecuteQuery()
+            # Using Include syntax in a single string is standard for PowerShell CSOM property loading
+            $ctx.Load($items, "Include(FileRef, FileDirRef, FileLeafRef, HasUniqueRoleAssignments, FileSystemObjectType)")
+            Execute-QueryWithRetry $ctx
 
             $position = $items.ListItemCollectionPosition
             foreach ($it in $items) { $allItems.Add($it) }
@@ -321,33 +359,34 @@ $backgroundScript = {
             if ($syncHash.CancelRequested) { Log "[INFO] Cancellation requested."; return }
             $it = $allItems[$i]
 
-            # CSOM requires explicit retrieval of properties if not loaded.
-            # We'll use the Retrieve method which is safer in PowerShell than the 2-arg Load.
-            $it.Retrieve("FileRef", "FileDirRef", "FileLeafRef", "HasUniqueRoleAssignments", "FileSystemObjectType")
-            $ctx.ExecuteQuery()
-
             $fileRef = "" + $it["FileRef"]
             $fileDir = ("" + $it["FileDirRef"]).TrimEnd("/")
             $leaf    = "" + $it["FileLeafRef"]
-            $isFolder = $it.FileSystemObjectType -eq [Microsoft.SharePoint.Client.FileSystemObjectType]::Folder
+            # FSObjType: 0=File, 1=Folder
+            $isFolder = ($it.FileSystemObjectType -eq [Microsoft.SharePoint.Client.FileSystemObjectType]::Folder) -or ($it["FileSystemObjectType"] -eq 1)
 
             if ($leaf -eq "Forms" -or $leaf -eq "_t" -or $leaf -eq "_w") { continue }
 
             $topFolder = "(root)"
-            if ($fileDir -eq $rootUrl -or [string]::IsNullOrWhiteSpace($fileDir)) { $topFolder = "(root)" }
-            elseif ($fileDir.StartsWith($rootUrl + "/")) {
-                $topFolder = $fileDir.Substring($rootUrl.Length + 1).Split("/")[0]
-                if ([string]::IsNullOrWhiteSpace($topFolder)) { $topFolder = "(root)" }
-            } else { $topFolder = "(outside-root?)" }
+            $relPath = ""
+            if ($fileDir.Length -gt $rootUrl.Length) {
+                $relPath = $fileDir.Substring($rootUrl.Length).TrimStart("/")
+            }
+
+            if ([string]::IsNullOrWhiteSpace($relPath)) {
+                $topFolder = "(root)"
+            } else {
+                $topFolder = $relPath.Split("/")[0]
+            }
 
             if (-not $folderCounts.ContainsKey($topFolder)) { $folderCounts[$topFolder] = 0 }
             $folderCounts[$topFolder]++
 
             if ([bool]$it.HasUniqueRoleAssignments) {
                 if (-not $isDryRun) {
-                    Log "[ACTION] Resetting $fileRef"
+                    Log "[ACTION] Resetting Inheritance: $fileRef"
                     $it.ResetRoleInheritance()
-                    $ctx.ExecuteQuery()
+                    Execute-QueryWithRetry $ctx
                 }
                 $flagged.Add([pscustomobject]@{ Url = $fileRef; Name = $leaf; Type = if ($isFolder) { "Folder" } else { "File" }; TopFolder = $topFolder; HasUniquePermissions = $true; Status = if ($isDryRun) { "Detected" } else { "Reset" } })
             }
@@ -379,7 +418,6 @@ $backgroundScript = {
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 200
 $timer.Add_Tick({
-    # We use Monitor to safely access the synchronized list
     if ($logQueue.Count -gt 0) {
         [System.Threading.Monitor]::Enter($logQueue.SyncRoot)
         try {
@@ -409,10 +447,7 @@ $timer.Add_Tick({
     }
 })
 
-$btnStart.Add_Click({
-    if ([string]::IsNullOrWhiteSpace($txtSite.Text) -or [string]::IsNullOrWhiteSpace($txtUser.Text) -or [string]::IsNullOrWhiteSpace($txtPass.Text)) {
-        [System.Windows.Forms.MessageBox]::Show("Please fill Site URL, Username, and App Password.") | Out-Null; return
-    }
+function Start-Runspace-Logic($data) {
     $syncHash.Progress = 0
     $syncHash.Status = "Starting..."
     $syncHash.CancelRequested = $false
@@ -420,42 +455,36 @@ $btnStart.Add_Click({
     $syncHash.Error = $null
     $syncHash.Completed = $false
     $logQueue.Clear()
-    $txtLog.Clear()
     SetUiRunning $true
 
-    $data = @{ SiteUrl = $txtSite.Text.Trim(); Library = $txtLib.Text.Trim(); Username = $txtUser.Text.Trim(); Password = $txtPass.Text; AdminUrl = $txtAdmin.Text.Trim(); Output = $txtOut.Text.Trim(); SleepSec = $numSleep.Value; IsDryRun = $rbDryRun.Checked; IsTest = $false }
-
     $runspace = [runspacefactory]::CreateRunspace()
+    $runspace.ApartmentState = "STA"
+    $runspace.ThreadOptions = "ReuseThread"
     $runspace.Open()
     $runspace.SessionStateProxy.SetVariable("syncHash", $syncHash)
     $runspace.SessionStateProxy.SetVariable("logQueue", $logQueue)
+
     $powershell = [PowerShell]::Create().AddScript($backgroundScript).AddArgument($data).AddArgument($syncHash).AddArgument($logQueue)
     $powershell.Runspace = $runspace
     $powershell.BeginInvoke()
     $timer.Start()
+}
+
+$btnStart.Add_Click({
+    if ([string]::IsNullOrWhiteSpace($txtSite.Text) -or [string]::IsNullOrWhiteSpace($txtUser.Text) -or [string]::IsNullOrWhiteSpace($txtPass.Text)) {
+        [System.Windows.Forms.MessageBox]::Show("Please fill all credentials.") | Out-Null; return
+    }
+    $txtLog.Clear()
+    $data = @{ SiteUrl = $txtSite.Text.Trim(); Library = $txtLib.Text.Trim(); Username = $txtUser.Text.Trim(); Password = $txtPass.Text; AdminUrl = $txtAdmin.Text.Trim(); Output = $txtOut.Text.Trim(); SleepSec = $numSleep.Value; IsDryRun = $rbDryRun.Checked; IsTest = $false }
+    Start-Runspace-Logic $data
 })
 
 $btnTest.Add_Click({
     if ([string]::IsNullOrWhiteSpace($txtSite.Text) -or [string]::IsNullOrWhiteSpace($txtUser.Text) -or [string]::IsNullOrWhiteSpace($txtPass.Text)) {
         [System.Windows.Forms.MessageBox]::Show("Please fill Site URL, Username, and App Password.") | Out-Null; return
     }
-    $syncHash.Progress = 0
-    $syncHash.Status = "Testing Connection..."
-    $syncHash.CancelRequested = $false
-    $syncHash.Completed = $false
-    $logQueue.Clear()
-    SetUiRunning $true
-
     $data = @{ SiteUrl = $txtSite.Text.Trim(); Username = $txtUser.Text.Trim(); Password = $txtPass.Text; IsTest = $true }
-
-    $runspace = [runspacefactory]::CreateRunspace()
-    $runspace.Open()
-    $runspace.SessionStateProxy.SetVariable("syncHash", $syncHash)
-    $runspace.SessionStateProxy.SetVariable("logQueue", $logQueue)
-    $powershell = [PowerShell]::Create().AddScript($backgroundScript).AddArgument($data).AddArgument($syncHash).AddArgument($logQueue)
-    $powershell.Runspace = $runspace
-    $powershell.BeginInvoke()
-    $timer.Start()
+    Start-Runspace-Logic $data
 })
 
 $btnCancel.Add_Click({
