@@ -1,15 +1,12 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    SharePoint Online Permissions Tool (GUI)
+    SharePoint Online & Atlas RBAC Tool (GUI)
     - Detects unique permissions and counts items (Dry Run)
     - Detects site-level external sharing settings
     - Optionally resets unique permissions (inheritance)
+    - Ability to provision Atlas groups and invite users (RBAC)
     - Compatible with PowerShell 5.1 and uses CSOM (Username + App Password)
-
-.DESCRIPTION
-    This script provides a GUI to manage SharePoint Online permissions. It uses Runspaces
-    in STA mode and includes comprehensive diagnostics to troubleshoot IDCRL/Login issues.
 #>
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -25,7 +22,6 @@ function Load-SharePointAssemblies {
         "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\15\ISAPI",
         "C:\Program Files (x86)\Common Files\Microsoft Shared\Web Server Extensions\15\ISAPI"
     )
-
     foreach ($path in $searchPaths) {
         $clientDll = Join-Path $path "Microsoft.SharePoint.Client.dll"
         if (Test-Path $clientDll) {
@@ -38,7 +34,6 @@ function Load-SharePointAssemblies {
             } catch { }
         }
     }
-    # Fallback GAC
     try {
         Add-Type -AssemblyName "Microsoft.SharePoint.Client, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
         Add-Type -AssemblyName "Microsoft.SharePoint.Client.Runtime, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
@@ -53,7 +48,7 @@ if (-not (Load-SharePointAssemblies)) {
 
 # ---------------- GUI Initialization ----------------
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "SPO Permissions Manager (CSOM) - Advanced Diagnostics"
+$form.Text = "SPO & Atlas Management Suite"
 $form.Size = New-Object System.Drawing.Size(1100, 950)
 $form.StartPosition = "CenterScreen"
 
@@ -77,56 +72,44 @@ function New-TextBox($x, $y, $w, $text = "") {
     $t
 }
 
-# Shared Data for Runspace Communication
-$logQueue = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
-$syncHash = [hashtable]::Synchronized(@{
-    Status = "Idle"
-    Progress = 0
-    CancelRequested = $false
-    IsRunning = $false
-    Result = $null
-    Error = $null
-    Completed = $false
-})
-
-# Inputs
+# Common Inputs (Static)
 $form.Controls.Add((New-Label "Site URL" 10 10))
 $txtSite = New-TextBox 10 30 1065 ""
 $form.Controls.Add($txtSite)
 
-$form.Controls.Add((New-Label "Library Title" 10 60))
-$txtLib = New-TextBox 10 80 240 "Documents"
-$form.Controls.Add($txtLib)
-
-$form.Controls.Add((New-Label "Username (UPN)" 270 60))
-$txtUser = New-TextBox 270 80 330 ""
+$form.Controls.Add((New-Label "Username (UPN)" 10 60))
+$txtUser = New-TextBox 10 80 500 ""
 $form.Controls.Add($txtUser)
 
-$form.Controls.Add((New-Label "App Password (MFA must be ON, and legacy auth allowed)" 610 60))
-$txtPass = New-TextBox 610 80 465 ""
+$form.Controls.Add((New-Label "App Password" 530 60))
+$txtPass = New-TextBox 530 80 545 ""
 $txtPass.UseSystemPasswordChar = $true
 $form.Controls.Add($txtPass)
 
-$form.Controls.Add((New-Label "Tenant Admin URL (Optional, for External Sharing check)" 10 110))
-$txtAdmin = New-TextBox 10 130 1065 ""
-$form.Controls.Add($txtAdmin)
+# Tab Control
+$tabControl = New-Object System.Windows.Forms.TabControl
+$tabControl.Location = New-Object System.Drawing.Point(10, 115)
+$tabControl.Size = New-Object System.Drawing.Size(1065, 230)
+$form.Controls.Add($tabControl)
 
-$form.Controls.Add((New-Label "Output Folder" 10 160))
-$txtOut = New-TextBox 10 180 900 (Join-Path $PWD "SPO-Permissions-Output")
-$form.Controls.Add($txtOut)
+# --- Tab 1: Permissions Audit/Reset ---
+$tabPerms = New-Object System.Windows.Forms.TabPage
+$tabPerms.Text = "Permissions & Audit"
+$tabControl.TabPages.Add($tabPerms)
 
-$btnBrowse = New-Object System.Windows.Forms.Button
-$btnBrowse.Text = "Browse..."
-$btnBrowse.Location = New-Object System.Drawing.Point(920, 178)
-$btnBrowse.Size = New-Object System.Drawing.Size(155, 25)
-$form.Controls.Add($btnBrowse)
+$tabPerms.Controls.Add((New-Label "Library Title" 10 10))
+$txtLib = New-TextBox 10 30 240 "Documents"
+$tabPerms.Controls.Add($txtLib)
 
-# Mode Selection
+$tabPerms.Controls.Add((New-Label "Tenant Admin URL (Optional, for Sharing check)" 270 10))
+$txtAdmin = New-TextBox 270 30 780 ""
+$tabPerms.Controls.Add($txtAdmin)
+
 $grpMode = New-Object System.Windows.Forms.GroupBox
 $grpMode.Text = "Execution Mode"
-$grpMode.Location = New-Object System.Drawing.Point(10, 210)
+$grpMode.Location = New-Object System.Drawing.Point(10, 65)
 $grpMode.Size = New-Object System.Drawing.Size(300, 60)
-$form.Controls.Add($grpMode)
+$tabPerms.Controls.Add($grpMode)
 
 $rbDryRun = New-Object System.Windows.Forms.RadioButton
 $rbDryRun.Text = "Dry Run (Scan Only)"
@@ -141,38 +124,76 @@ $rbReset.Location = New-Object System.Drawing.Point(150, 25)
 $rbReset.AutoSize = $true
 $grpMode.Controls.Add($rbReset)
 
-$form.Controls.Add((New-Label "Sleep (sec) between unique items" 320 210))
+$tabPerms.Controls.Add((New-Label "Sleep (sec) between unique items" 320 65))
 $numSleep = New-Object System.Windows.Forms.NumericUpDown
-$numSleep.Location = New-Object System.Drawing.Point(320, 235)
+$numSleep.Location = New-Object System.Drawing.Point(320, 90)
 $numSleep.Size = New-Object System.Drawing.Size(100, 22)
 $numSleep.Minimum = 0
 $numSleep.Maximum = 10
 $numSleep.Value = 1
-$form.Controls.Add($numSleep)
+$tabPerms.Controls.Add($numSleep)
 
-# Buttons
+$btnStart = New-Object System.Windows.Forms.Button
+$btnStart.Text = "Start Scan/Reset"
+$btnStart.Location = New-Object System.Drawing.Point(10, 140)
+$btnStart.Size = New-Object System.Drawing.Size(155, 32)
+$tabPerms.Controls.Add($btnStart)
+
+$tabPerms.Controls.Add((New-Label "Output Folder" 270 65))
+$txtOut = New-TextBox 270 90 600 (Join-Path $PWD "SPO-Permissions-Output")
+$tabPerms.Controls.Add($txtOut)
+
+# --- Tab 2: Atlas RBAC & Invitations ---
+$tabAtlas = New-Object System.Windows.Forms.TabPage
+$tabAtlas.Text = "Atlas RBAC & Invites"
+$tabControl.TabPages.Add($tabAtlas)
+
+$tabAtlas.Controls.Add((New-Label "Atlas User Emails (One per line)" 10 10))
+$txtAtlasUsers = New-Object System.Windows.Forms.TextBox
+$txtAtlasUsers.Location = New-Object System.Drawing.Point(10, 30)
+$txtAtlasUsers.Size = New-Object System.Drawing.Size(400, 100)
+$txtAtlasUsers.Multiline = $true
+$txtAtlasUsers.ScrollBars = "Vertical"
+$tabAtlas.Controls.Add($txtAtlasUsers)
+
+$tabAtlas.Controls.Add((New-Label "Target RBAC Role" 430 10))
+$cmbAtlasRole = New-Object System.Windows.Forms.ComboBox
+$cmbAtlasRole.Location = New-Object System.Drawing.Point(430, 30)
+$cmbAtlasRole.Size = New-Object System.Drawing.Size(250, 22)
+$cmbAtlasRole.DropDownStyle = "DropDownList"
+[void]$cmbAtlasRole.Items.Add("Atlas Admins (Full Control)")
+[void]$cmbAtlasRole.Items.Add("Atlas Contributors (Edit)")
+[void]$cmbAtlasRole.Items.Add("Atlas Readers (Read)")
+$cmbAtlasRole.SelectedIndex = 1
+$tabAtlas.Controls.Add($cmbAtlasRole)
+
+$tabAtlas.Controls.Add((New-Label "Custom Group Name Prefix (Optional)" 430 65))
+$txtAtlasPrefix = New-TextBox 430 85 250 "Atlas"
+$tabAtlas.Controls.Add($txtAtlasPrefix)
+
+$btnAtlas = New-Object System.Windows.Forms.Button
+$btnAtlas.Text = "Provision Atlas RBAC"
+$btnAtlas.Location = New-Object System.Drawing.Point(430, 140)
+$btnAtlas.Size = New-Object System.Drawing.Size(200, 32)
+$tabAtlas.Controls.Add($btnAtlas)
+
+# Common Bottom Controls
 $btnTest = New-Object System.Windows.Forms.Button
-$btnTest.Text = "Test Connection + Full Diags"
-$btnTest.Location = New-Object System.Drawing.Point(10, 280)
+$btnTest.Text = "Test Connection + Diags"
+$btnTest.Location = New-Object System.Drawing.Point(10, 355)
 $btnTest.Size = New-Object System.Drawing.Size(200, 32)
 $form.Controls.Add($btnTest)
 
-$btnStart = New-Object System.Windows.Forms.Button
-$btnStart.Text = "Start Process"
-$btnStart.Location = New-Object System.Drawing.Point(220, 280)
-$btnStart.Size = New-Object System.Drawing.Size(155, 32)
-$form.Controls.Add($btnStart)
-
 $btnCancel = New-Object System.Windows.Forms.Button
 $btnCancel.Text = "Cancel"
-$btnCancel.Location = New-Object System.Drawing.Point(385, 280)
+$btnCancel.Location = New-Object System.Drawing.Point(220, 355)
 $btnCancel.Size = New-Object System.Drawing.Size(155, 32)
 $btnCancel.Enabled = $false
 $form.Controls.Add($btnCancel)
 
 $progress = New-Object System.Windows.Forms.ProgressBar
-$progress.Location = New-Object System.Drawing.Point(550, 286)
-$progress.Size = New-Object System.Drawing.Size(525, 20)
+$progress.Location = New-Object System.Drawing.Point(385, 361)
+$progress.Size = New-Object System.Drawing.Size(690, 20)
 $progress.Minimum = 0
 $progress.Maximum = 100
 $progress.Value = 0
@@ -180,45 +201,30 @@ $form.Controls.Add($progress)
 
 $lblStatus = New-Object System.Windows.Forms.Label
 $lblStatus.Text = "Idle"
-$lblStatus.Location = New-Object System.Drawing.Point(550, 308)
-$lblStatus.Size = New-Object System.Drawing.Size(525, 20)
+$lblStatus.Location = New-Object System.Drawing.Point(385, 383)
+$lblStatus.Size = New-Object System.Drawing.Size(690, 20)
 $form.Controls.Add($lblStatus)
 
-# Checklist Label
-$lblCheck = New-Label "IF LOGIN FAILS: 1. Legacy Auth must be enabled in Tenant. 2. MFA must be ON for the user. 3. Use an App Password (not your main pass)." 10 320
-$lblCheck.ForeColor = [System.Drawing.Color]::DarkRed
-$form.Controls.Add($lblCheck)
-
-# Log
 $txtLog = New-Object System.Windows.Forms.TextBox
-$txtLog.Location = New-Object System.Drawing.Point(10, 350)
-$txtLog.Size = New-Object System.Drawing.Size(1065, 540)
+$txtLog.Location = New-Object System.Drawing.Point(10, 410)
+$txtLog.Size = New-Object System.Drawing.Size(1065, 480)
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.ReadOnly = $true
 $txtLog.Font = New-Object System.Drawing.Font("Consolas", 9)
 $form.Controls.Add($txtLog)
 
-$folderDlg = New-Object System.Windows.Forms.FolderBrowserDialog
-
-$btnBrowse.Add_Click({
-    if ($folderDlg.ShowDialog() -eq "OK") { $txtOut.Text = $folderDlg.SelectedPath }
+# Shared Data for Runspace Communication
+$logQueue = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
+$syncHash = [hashtable]::Synchronized(@{
+    Status = "Idle"
+    Progress = 0
+    CancelRequested = $false
+    IsRunning = $false
+    Result = $null
+    Error = $null
+    Completed = $false
 })
-
-function SetUiRunning([bool]$running) {
-    $btnStart.Enabled = -not $running
-    $btnTest.Enabled = -not $running
-    $btnCancel.Enabled = $running
-    $txtSite.Enabled = -not $running
-    $txtLib.Enabled = -not $running
-    $txtUser.Enabled = -not $running
-    $txtPass.Enabled = -not $running
-    $txtAdmin.Enabled = -not $running
-    $txtOut.Enabled  = -not $running
-    $btnBrowse.Enabled = -not $running
-    $numSleep.Enabled = -not $running
-    $grpMode.Enabled = -not $running
-}
 
 # ---------------- Background Runspace Logic ----------------
 
@@ -229,48 +235,6 @@ $backgroundScript = {
 
     function Log($msg) {
         $logQueue.Add("[$((Get-Date).ToString('HH:mm:ss'))] $msg`r`n")
-    }
-
-    function Run-Diagnostics($siteUrl) {
-        Log "--- DIAGNOSTICS START ---"
-        Log "OS: $((Get-WmiObject Win32_OperatingSystem).Caption)"
-        Log "PS Version: $($PSVersionTable.PSVersion)"
-        Log "Process Architecture: $(if ([IntPtr]::Size -eq 8) { 'x64' } else { 'x86' })"
-        Log ".NET Framework: $((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release -ErrorAction SilentlyContinue).Release)"
-
-        # Security Protocol Check
-        Log "Current Security Protocol: $([System.Net.ServicePointManager]::SecurityProtocol)"
-        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
-        Log "Ensured Security Protocol: $([System.Net.ServicePointManager]::SecurityProtocol)"
-
-        # Assembly Info
-        $loaded = [AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.FullName -match "Microsoft.SharePoint.Client" }
-        foreach ($asm in $loaded) { Log "Loaded: $($asm.FullName) from $($asm.Location)" }
-
-        # IDCRL components check (msoidcli.dll is the engine)
-        $idcrldll = Join-Path $env:SystemRoot "System32\msoidcli.dll"
-        if (-not (Test-Path $idcrldll)) { $idcrldll = Join-Path $env:SystemRoot "SysWOW64\msoidcli.dll" }
-        if (Test-Path $idcrldll) {
-            $ver = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($idcrldll)
-            Log "IDCRL Engine Found: $idcrldll (Version: $($ver.FileVersion))"
-        } else { Log "WARN: IDCRL Engine (msoidcli.dll) NOT FOUND in System32 or SysWOW64." }
-
-        # Reachability
-        $hosts = @{ "SharePoint" = $siteUrl; "Login Server" = "https://login.microsoftonline.com" }
-        foreach ($h in $hosts.Keys) {
-            try {
-                $uri = New-Object System.Uri($hosts[$h])
-                Log "$h DNS Check ($($uri.Host)): $([System.Net.Dns]::GetHostAddresses($uri.Host))"
-                $tcp = New-Object System.Net.Sockets.TcpClient
-                $connect = $tcp.BeginConnect($uri.Host, 443, $null, $null)
-                if ($connect.AsyncWaitHandle.WaitOne(3000, $false)) {
-                    $tcp.EndConnect($connect)
-                    Log "$h TCP Port 443: Reachable"
-                } else { Log "$h TCP Port 443: TIMEOUT" }
-                $tcp.Close()
-            } catch { Log "$h Reachability Check Failed: $($_.Exception.Message)" }
-        }
-        Log "--- DIAGNOSTICS END ---"
     }
 
     function Execute-QueryWithRetry($context) {
@@ -286,14 +250,6 @@ $backgroundScript = {
                     $retryCount++
                     Log "[WARN] Throttled (429/503). Waiting 5 seconds... (Attempt $retryCount)"
                     Start-Sleep -Seconds 5
-                } elseif ($msg -like "*IDCRL*") {
-                    Log "[ERROR] IDCRL Error: The login server did not respond."
-                    Log "TROUBLESHOOTING CHECKLIST:"
-                    Log "1. Verify Legacy Auth is allowed in your tenant (Set-SPOTenant -LegacyAuthProtocolsEnabled `$true)."
-                    Log "2. Verify the account has MFA enabled and you are using an APP PASSWORD."
-                    Log "3. App Passwords won't work if Security Defaults are enabled (Conditional Access must be used instead)."
-                    Log "4. Ensure no Proxy is blocking login.microsoftonline.com."
-                    throw
                 } else { throw }
             }
         }
@@ -325,132 +281,195 @@ $backgroundScript = {
         $syncHash.IsRunning = $true
         Log "[INFO] Background process started."
         Load-Assemblies-Internal | Out-Null
-
-        $siteUrl  = $data.SiteUrl
-        $libTitle = $data.Library
-        $user     = $data.Username
-        $pass     = $data.Password
-        $adminUrl = $data.AdminUrl
-        $out      = $data.Output
-        $sleepSec = [int]$data.SleepSec
-        $isDryRun = [bool]$data.IsDryRun
-        $isTest   = [bool]$data.IsTest
-
-        # Always ensure TLS 1.2
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
-        if ($isTest) { Run-Diagnostics $siteUrl }
-
+        $siteUrl  = $data.SiteUrl
+        $user     = $data.Username
+        $pass     = $data.Password
         $secure = ConvertTo-SecureString -String $pass -AsPlainText -Force
 
-        if ($isTest) {
-            Log "[INFO] Attempting ExecuteQuery to verify login..."
+        if ($data.Task -eq "Test") {
+            Log "[INFO] Testing connection to $siteUrl..."
             $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
             $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
             $ctx.Load($ctx.Web)
             Execute-QueryWithRetry $ctx
-            Log "[SUCCESS] Authenticated successfully as $user"
+            Log "[SUCCESS] Connected to site: $($ctx.Web.Title)"
             $syncHash.Status = "Test Successful"
             return
         }
 
-        New-Item -ItemType Directory -Force -Path $out | Out-Null
-        $ts = Get-Date -Format "yyyyMMdd-HHmmss"
-        $flagCsv   = Join-Path $out "permissions-flagged-items-$ts.csv"
-        $countCsv  = Join-Path $out "folder-counts-$ts.csv"
-        $summaryJs = Join-Path $out "summary-$ts.json"
+        if ($data.Task -eq "Permissions") {
+            $libTitle = $data.Library
+            $adminUrl = $data.AdminUrl
+            $sleepSec = $data.SleepSec
+            $isDryRun = $data.IsDryRun
+            $out      = $data.Output
 
-        $sharingCapability = "Unknown"
-        if (-not [string]::IsNullOrWhiteSpace($adminUrl)) {
-            Log "[INFO] Checking Sharing Capability via Tenant Admin..."
-            try {
-                $adminCtx = New-Object Microsoft.SharePoint.Client.ClientContext($adminUrl)
-                $adminCtx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
-                $tenant = New-Object Microsoft.Online.SharePoint.TenantAdministration.Tenant($adminCtx)
-                $siteProperties = $tenant.GetSitePropertiesByUrl($siteUrl, $true)
-                $adminCtx.Load($siteProperties)
-                Execute-QueryWithRetry $adminCtx
-                $sharingCapability = $siteProperties.SharingCapability.ToString()
-                Log "[INFO] Site Sharing Capability: $sharingCapability"
-            } catch { Log "[WARN] Failed to check Sharing Capability: $($_.Exception.Message)" }
-        }
+            New-Item -ItemType Directory -Force -Path $out | Out-Null
+            $ts = Get-Date -Format "yyyyMMdd-HHmmss"
+            $flagCsv   = Join-Path $out "permissions-flagged-items-$ts.csv"
+            $countCsv  = Join-Path $out "folder-counts-$ts.csv"
+            $summaryJs = Join-Path $out "summary-$ts.json"
 
-        Log "[INFO] Connecting to Library: $libTitle..."
-        $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
-        $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
-        $list = $ctx.Web.Lists.GetByTitle($libTitle)
-        $ctx.Load($list)
-        $ctx.Load($list.RootFolder)
-        Execute-QueryWithRetry $ctx
-        $rootUrl = $list.RootFolder.ServerRelativeUrl.TrimEnd("/")
-
-        Log "[INFO] Enumerate items (Recursive)..."
-        $allItems = New-Object System.Collections.Generic.List[object]
-        $position = $null
-        do {
-            if ($syncHash.CancelRequested) { Log "[INFO] Cancellation requested."; return }
-            $qry = New-Object Microsoft.SharePoint.Client.CamlQuery
-            $qry.ViewXml = "<View Scope='RecursiveAll'><RowLimit>2000</RowLimit></View>"
-            $qry.ListItemCollectionPosition = $position
-            $items = $list.GetItems($qry)
-
-            $ctx.Load($items, "Include(FileRef, FileDirRef, FileLeafRef, HasUniqueRoleAssignments, FileSystemObjectType)")
-            Execute-QueryWithRetry $ctx
-
-            $position = $items.ListItemCollectionPosition
-            foreach ($it in $items) { $allItems.Add($it) }
-            Log "[INFO] Retrieved $($allItems.Count) items..."
-            $syncHash.Status = "Retrieved $($allItems.Count) items"
-        } while ($position -ne $null)
-
-        $total = $allItems.Count
-        $folderCounts = @{}
-        $flagged = New-Object System.Collections.Generic.List[object]
-
-        Log "[INFO] Processing $total items..."
-        for ($i=0; $i -lt $total; $i++) {
-            if ($syncHash.CancelRequested) { Log "[INFO] Cancellation requested."; return }
-            $it = $allItems[$i]
-
-            $fileRef = "" + $it["FileRef"]
-            $fileDir = ("" + $it["FileDirRef"]).TrimEnd("/")
-            $leaf    = "" + $it["FileLeafRef"]
-            $isFolder = ($it.FileSystemObjectType -eq [Microsoft.SharePoint.Client.FileSystemObjectType]::Folder) -or ($it["FileSystemObjectType"] -eq 1)
-
-            if ($leaf -eq "Forms" -or $leaf -eq "_t" -or $leaf -eq "_w") { continue }
-
-            $topFolder = "(root)"
-            $relPath = ""
-            if ($fileDir.Length -gt $rootUrl.Length) { $relPath = $fileDir.Substring($rootUrl.Length).TrimStart("/") }
-            if ([string]::IsNullOrWhiteSpace($relPath)) { $topFolder = "(root)" }
-            else { $topFolder = $relPath.Split("/")[0] }
-
-            if (-not $folderCounts.ContainsKey($topFolder)) { $folderCounts[$topFolder] = 0 }
-            $folderCounts[$topFolder]++
-
-            if ([bool]$it.HasUniqueRoleAssignments) {
-                if (-not $isDryRun) {
-                    Log "[ACTION] Resetting Inheritance: $fileRef"
-                    $it.ResetRoleInheritance()
-                    Execute-QueryWithRetry $ctx
-                }
-                $flagged.Add([pscustomobject]@{ Url = $fileRef; Name = $leaf; Type = if ($isFolder) { "Folder" } else { "File" }; TopFolder = $topFolder; HasUniquePermissions = $true; Status = if ($isDryRun) { "Detected" } else { "Reset" } })
+            $sharingCapability = "Unknown"
+            if (-not [string]::IsNullOrWhiteSpace($adminUrl)) {
+                Log "[INFO] Checking Sharing Capability via Tenant Admin..."
+                try {
+                    $adminCtx = New-Object Microsoft.SharePoint.Client.ClientContext($adminUrl)
+                    $adminCtx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
+                    $tenant = New-Object Microsoft.Online.SharePoint.TenantAdministration.Tenant($adminCtx)
+                    $siteProperties = $tenant.GetSitePropertiesByUrl($siteUrl, $true)
+                    $adminCtx.Load($siteProperties)
+                    Execute-QueryWithRetry $adminCtx
+                    $sharingCapability = $siteProperties.SharingCapability.ToString()
+                    Log "[INFO] Site Sharing Capability: $sharingCapability"
+                } catch { Log "[WARN] Failed to check Sharing Capability: $($_.Exception.Message)" }
             }
 
-            if ($sleepSec -gt 0 -and $it.HasUniqueRoleAssignments) { Start-Sleep -Seconds $sleepSec }
+            Log "[INFO] Starting Permissions Task for $libTitle..."
+            $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
+            $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
 
-            $syncHash.Progress = [int](10 + (90 * ($i / $total)))
-            $syncHash.Status = "Processing $i / $total"
+            $list = $ctx.Web.Lists.GetByTitle($libTitle)
+            $ctx.Load($list)
+            $ctx.Load($list.RootFolder)
+            Execute-QueryWithRetry $ctx
+            $rootUrl = $list.RootFolder.ServerRelativeUrl.TrimEnd("/")
+
+            Log "[INFO] Enumerating items..."
+            $allItems = New-Object System.Collections.Generic.List[object]
+            $position = $null
+            do {
+                if ($syncHash.CancelRequested) { Log "[INFO] Cancellation requested."; return }
+                $qry = New-Object Microsoft.SharePoint.Client.CamlQuery
+                $qry.ViewXml = "<View Scope='RecursiveAll'><RowLimit>2000</RowLimit></View>"
+                $qry.ListItemCollectionPosition = $position
+                $items = $list.GetItems($qry)
+
+                # Single-parameter Load is compatible with PS 5.1 CSOM
+                $ctx.Load($items)
+                Execute-QueryWithRetry $ctx
+
+                # Batch retrieval of required properties for all items in page
+                foreach ($it in $items) {
+                    # Note: We can't use Include in string in Load($items) easily in raw CSOM,
+                    # so we queue properties for each item.
+                    $ctx.Load($it, "FileRef", "FileDirRef", "FileLeafRef", "HasUniqueRoleAssignments", "FileSystemObjectType")
+                }
+                Execute-QueryWithRetry $ctx
+
+                $position = $items.ListItemCollectionPosition
+                foreach ($it in $items) { $allItems.Add($it) }
+                Log "[INFO] Retrieved $($allItems.Count) items..."
+                $syncHash.Status = "Retrieved $($allItems.Count) items"
+            } while ($position -ne $null)
+
+            $total = $allItems.Count
+            $folderCounts = @{}
+            $flagged = New-Object System.Collections.Generic.List[object]
+
+            for ($i=0; $i -lt $total; $i++) {
+                if ($syncHash.CancelRequested) { Log "[INFO] Cancellation requested."; return }
+                $it = $allItems[$i]
+                $fileRef = "" + $it["FileRef"]
+                $fileDir = ("" + $it["FileDirRef"]).TrimEnd("/")
+                $leaf    = "" + $it["FileLeafRef"]
+                $isFolder = ($it.FileSystemObjectType -eq [Microsoft.SharePoint.Client.FileSystemObjectType]::Folder) -or ($it["FileSystemObjectType"] -eq 1)
+
+                if ($leaf -eq "Forms") { continue }
+
+                $relPath = if ($fileDir.Length -gt $rootUrl.Length) { $fileDir.Substring($rootUrl.Length).TrimStart("/") } else { "" }
+                $topFolder = if ([string]::IsNullOrWhiteSpace($relPath)) { "(root)" } else { $relPath.Split("/")[0] }
+
+                if (-not $folderCounts.ContainsKey($topFolder)) { $folderCounts[$topFolder] = 0 }
+                $folderCounts[$topFolder]++
+
+                if ([bool]$it.HasUniqueRoleAssignments) {
+                    if (-not $isDryRun) {
+                        Log "[ACTION] Resetting Inheritance: $fileRef"
+                        $it.ResetRoleInheritance()
+                        Execute-QueryWithRetry $ctx
+                    }
+                    $flagged.Add([pscustomobject]@{ Url = $fileRef; Name = $leaf; Type = if ($isFolder) { "Folder" } else { "File" }; TopFolder = $topFolder; HasUniquePermissions = $true; Status = if ($isDryRun) { "Detected" } else { "Reset" } })
+                }
+                if ($sleepSec -gt 0 -and $it.HasUniqueRoleAssignments) { Start-Sleep -Seconds $sleepSec }
+                $syncHash.Progress = [int](10 + (90 * ($i / $total)))
+                $syncHash.Status = "Processing $i / $total"
+            }
+
+            Log "[INFO] Exporting reports..."
+            $flagged | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $flagCsv
+            $folderCounts.GetEnumerator() | Sort-Object Name | ForEach-Object { [pscustomobject]@{ TopLevelFolder = $_.Name; ItemCount = $_.Value } } | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $countCsv
+
+            $summary = @{ Timestamp = (Get-Date).ToString("o"); SiteUrl = $siteUrl; Library = $libTitle; SharingCapability = $sharingCapability; TotalItemsScanned = $total; UniquePermissionsFound = $flagged.Count; Mode = if ($isDryRun) { "Dry Run" } else { "Reset" }; Outputs = @{ FlaggedItemsCsv = $flagCsv; FolderCountsCsv = $countCsv } }
+            $summary | ConvertTo-Json -Depth 6 | Out-File -Encoding UTF8 -FilePath $summaryJs
+
+            Log "[INFO] Task completed. Items flagged: $($flagged.Count)"
+            $syncHash.Result = $summary
         }
 
-        Log "[INFO] Exporting reports..."
-        $flagged | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $flagCsv
-        $folderCounts.GetEnumerator() | Sort-Object Name | ForEach-Object { [pscustomobject]@{ TopLevelFolder = $_.Name; ItemCount = $_.Value } } | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $countCsv
+        if ($data.Task -eq "Atlas") {
+            Log "[INFO] Starting Atlas RBAC Provisioning..."
+            $emails = $data.Users -split "`r`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            $roleName = $data.Role
+            $prefix = $data.Prefix
 
-        $summary = @{ Timestamp = (Get-Date).ToString("o"); SiteUrl = $siteUrl; Library = $libTitle; SharingCapability = $sharingCapability; TotalItemsScanned = $total; UniquePermissionsFound = $flagged.Count; Mode = if ($isDryRun) { "Dry Run" } else { "Reset" }; Outputs = @{ FlaggedItemsCsv = $flagCsv; FolderCountsCsv = $countCsv } }
-        $summary | ConvertTo-Json -Depth 6 | Out-File -Encoding UTF8 -FilePath $summaryJs
-        $syncHash.Result = $summary
-        Log "[INFO] Completed successfully."
+            $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
+            $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
+            $web = $ctx.Web
+            $ctx.Load($web)
+            Execute-QueryWithRetry $ctx
+
+            $groupName = "$prefix - $roleName"
+            Log "[INFO] Targeting SharePoint Group: $groupName"
+
+            $group = $null
+            try {
+                $group = $web.SiteGroups.GetByName($groupName)
+                $ctx.Load($group)
+                Execute-QueryWithRetry $ctx
+                Log "[INFO] Group already exists."
+            } catch {
+                Log "[INFO] Creating group..."
+                $groupInfo = New-Object Microsoft.SharePoint.Client.GroupCreationInformation
+                $groupInfo.Title = $groupName
+                $group = $web.SiteGroups.Add($groupInfo)
+                $ctx.Load($group)
+                Execute-QueryWithRetry $ctx
+                Log "[SUCCESS] Group created."
+            }
+
+            # Assign Permission Level
+            Log "[INFO] Ensuring permissions for group..."
+            $roleDefName = if ($roleName -match "Admins") { "Full Control" } elseif ($roleName -match "Contributors") { "Edit" } else { "Read" }
+            $roleDef = $web.RoleDefinitions.GetByName($roleDefName)
+            $roleAssign = New-Object Microsoft.SharePoint.Client.RoleDefinitionBindingCollection($ctx)
+            $roleAssign.Add($roleDef)
+            $web.RoleAssignments.Add($group, $roleAssign)
+            Execute-QueryWithRetry $ctx
+            Log "[SUCCESS] Permissions set to $roleDefName"
+
+            # Add Users
+            foreach ($email in $emails) {
+                if ($syncHash.CancelRequested) { return }
+                try {
+                    Log "[INFO] Inviting user: $email"
+                    $ensureUser = $web.EnsureUser($email.Trim())
+                    $ctx.Load($ensureUser)
+                    Execute-QueryWithRetry $ctx
+
+                    $group.Users.AddUser($ensureUser)
+                    Execute-QueryWithRetry $ctx
+                    Log "[SUCCESS] User $email added to group."
+                } catch {
+                    Log "[ERROR] Failed to add user $email : $($_.Exception.Message)"
+                }
+            }
+            Log "[INFO] Atlas Provisioning Completed."
+            $syncHash.Status = "Atlas Provisioning Completed"
+        }
+
     } catch {
         Log "[ERROR] $($_.Exception.Message)"
         $syncHash.Error = $_.Exception.Message
@@ -460,7 +479,7 @@ $backgroundScript = {
     }
 }
 
-# ---------------- UI Timer to update from SyncHash ----------------
+# ---------------- UI Timer ----------------
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 200
 $timer.Add_Tick({
@@ -475,41 +494,23 @@ $timer.Add_Tick({
             [System.Threading.Monitor]::Exit($logQueue.SyncRoot)
         }
     }
-
     $lblStatus.Text = $syncHash.Status
     $progress.Value = $syncHash.Progress
-
     if ($syncHash.Completed) {
-        $timer.Stop()
-        $syncHash.Completed = $false
-        SetUiRunning $false
-        if ($syncHash.Error) {
-            [System.Windows.Forms.MessageBox]::Show("Error: $($syncHash.Error)", "Error", "OK", "Error") | Out-Null
-        } elseif ($syncHash.Status -eq "Test Successful") {
-            [System.Windows.Forms.MessageBox]::Show("Test Connection Successful!", "Success") | Out-Null
-        } elseif ($syncHash.Result) {
-            [System.Windows.Forms.MessageBox]::Show("Process completed.`n`nFound $($syncHash.Result.UniquePermissionsFound) items with unique permissions.", "Done") | Out-Null
-        }
+        $timer.Stop(); $syncHash.Completed = $false; SetUiRunning $false
+        if ($syncHash.Error) { [System.Windows.Forms.MessageBox]::Show("Error: $($syncHash.Error)", "Error") | Out-Null }
+        elseif ($syncHash.Status -eq "Test Successful") { [System.Windows.Forms.MessageBox]::Show("Connected!", "Success") | Out-Null }
+        else { [System.Windows.Forms.MessageBox]::Show("Operation Completed.", "Done") | Out-Null }
     }
 })
 
-function Start-Runspace-Logic($data) {
-    $syncHash.Progress = 0
-    $syncHash.Status = "Starting..."
-    $syncHash.CancelRequested = $false
-    $syncHash.Result = $null
-    $syncHash.Error = $null
-    $syncHash.Completed = $false
-    $logQueue.Clear()
+function Start-Task($data) {
     SetUiRunning $true
-
+    $syncHash.Progress = 0; $syncHash.Status = "Starting..."; $syncHash.CancelRequested = $false; $syncHash.Completed = $false
     $runspace = [runspacefactory]::CreateRunspace()
-    $runspace.ApartmentState = "STA"
-    $runspace.ThreadOptions = "ReuseThread"
-    $runspace.Open()
+    $runspace.ApartmentState = "STA"; $runspace.Open()
     $runspace.SessionStateProxy.SetVariable("syncHash", $syncHash)
     $runspace.SessionStateProxy.SetVariable("logQueue", $logQueue)
-
     $powershell = [PowerShell]::Create().AddScript($backgroundScript).AddArgument($data).AddArgument($syncHash).AddArgument($logQueue)
     $powershell.Runspace = $runspace
     $powershell.BeginInvoke()
@@ -517,25 +518,23 @@ function Start-Runspace-Logic($data) {
 }
 
 $btnStart.Add_Click({
-    if ([string]::IsNullOrWhiteSpace($txtSite.Text) -or [string]::IsNullOrWhiteSpace($txtUser.Text) -or [string]::IsNullOrWhiteSpace($txtPass.Text)) {
-        [System.Windows.Forms.MessageBox]::Show("Please fill all credentials.") | Out-Null; return
-    }
-    $txtLog.Clear()
-    $data = @{ SiteUrl = $txtSite.Text.Trim(); Library = $txtLib.Text.Trim(); Username = $txtUser.Text.Trim(); Password = $txtPass.Text; AdminUrl = $txtAdmin.Text.Trim(); Output = $txtOut.Text.Trim(); SleepSec = $numSleep.Value; IsDryRun = $rbDryRun.Checked; IsTest = $false }
-    Start-Runspace-Logic $data
+    if ([string]::IsNullOrWhiteSpace($txtSite.Text)) { return }
+    $data = @{ Task="Permissions"; SiteUrl=$txtSite.Text; Username=$txtUser.Text; Password=$txtPass.Text; Library=$txtLib.Text; AdminUrl=$txtAdmin.Text; SleepSec=$numSleep.Value; IsDryRun=$rbDryRun.Checked; Output=$txtOut.Text }
+    Start-Task $data
+})
+
+$btnAtlas.Add_Click({
+    if ([string]::IsNullOrWhiteSpace($txtSite.Text) -or [string]::IsNullOrWhiteSpace($txtAtlasUsers.Text)) { return }
+    $data = @{ Task="Atlas"; SiteUrl=$txtSite.Text; Username=$txtUser.Text; Password=$txtPass.Text; Users=$txtAtlasUsers.Text; Role=$cmbAtlasRole.Text; Prefix=$txtAtlasPrefix.Text }
+    Start-Task $data
 })
 
 $btnTest.Add_Click({
-    if ([string]::IsNullOrWhiteSpace($txtSite.Text) -or [string]::IsNullOrWhiteSpace($txtUser.Text) -or [string]::IsNullOrWhiteSpace($txtPass.Text)) {
-        [System.Windows.Forms.MessageBox]::Show("Please fill Site URL, Username, and App Password.") | Out-Null; return
-    }
-    $data = @{ SiteUrl = $txtSite.Text.Trim(); Username = $txtUser.Text.Trim(); Password = $txtPass.Text; IsTest = $true }
-    Start-Runspace-Logic $data
+    if ([string]::IsNullOrWhiteSpace($txtSite.Text)) { return }
+    Start-Task @{ Task="Test"; SiteUrl=$txtSite.Text; Username=$txtUser.Text; Password=$txtPass.Text }
 })
 
-$btnCancel.Add_Click({
-    $syncHash.CancelRequested = $true
-    $lblStatus.Text = "Cancellation Requested..."
-})
+$btnCancel.Add_Click({ $syncHash.CancelRequested = $true; $lblStatus.Text = "Cancelling..." })
 
+SetUiRunning $false
 [void]$form.ShowDialog()
