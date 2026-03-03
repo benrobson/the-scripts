@@ -9,7 +9,7 @@
 
 .DESCRIPTION
     This script provides a GUI to manage SharePoint Online permissions. It uses Runspaces
-    in STA mode to ensure UI responsiveness and compatibility with SPO authentication.
+    in STA mode and includes comprehensive diagnostics to troubleshoot IDCRL/Login issues.
 #>
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -19,7 +19,6 @@ $ErrorActionPreference = "Stop"
 
 # ---- CSOM DLL Loader ----
 function Load-SharePointAssemblies {
-    $found = $false
     $searchPaths = @(
         "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI",
         "C:\Program Files (x86)\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI",
@@ -35,21 +34,16 @@ function Load-SharePointAssemblies {
                 Add-Type -Path (Join-Path $path "Microsoft.SharePoint.Client.Runtime.dll") -ErrorAction SilentlyContinue
                 $tenantDll = Join-Path $path "Microsoft.Online.SharePoint.Client.Tenant.dll"
                 if (Test-Path $tenantDll) { Add-Type -Path $tenantDll -ErrorAction SilentlyContinue }
-                $found = $true
                 return $true
             } catch { }
         }
     }
-
-    if (-not $found) {
-        try {
-            Add-Type -AssemblyName "Microsoft.SharePoint.Client, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
-            Add-Type -AssemblyName "Microsoft.SharePoint.Client.Runtime, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
-            $found = $true
-            return $true
-        } catch { }
-    }
-    return $false
+    # Fallback GAC
+    try {
+        Add-Type -AssemblyName "Microsoft.SharePoint.Client, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
+        Add-Type -AssemblyName "Microsoft.SharePoint.Client.Runtime, Version=16.0.0.0, Culture=neutral, PublicKeyToken=71e9bce111e9429c" -ErrorAction SilentlyContinue
+        return $true
+    } catch { return $false }
 }
 
 if (-not (Load-SharePointAssemblies)) {
@@ -59,8 +53,8 @@ if (-not (Load-SharePointAssemblies)) {
 
 # ---------------- GUI Initialization ----------------
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "SPO Permissions Manager (CSOM)"
-$form.Size = New-Object System.Drawing.Size(980, 850)
+$form.Text = "SPO Permissions Manager (CSOM) - Diagnostics Enabled"
+$form.Size = New-Object System.Drawing.Size(980, 900)
 $form.StartPosition = "CenterScreen"
 
 $font = New-Object System.Drawing.Font("Segoe UI", 9)
@@ -108,7 +102,7 @@ $form.Controls.Add((New-Label "Username (UPN)" 270 60))
 $txtUser = New-TextBox 270 80 330 ""
 $form.Controls.Add($txtUser)
 
-$form.Controls.Add((New-Label "App Password" 610 60))
+$form.Controls.Add((New-Label "App Password (MFA must be ON, and legacy auth allowed)" 610 60))
 $txtPass = New-TextBox 610 80 345 ""
 $txtPass.UseSystemPasswordChar = $true
 $form.Controls.Add($txtPass)
@@ -147,7 +141,7 @@ $rbReset.Location = New-Object System.Drawing.Point(150, 25)
 $rbReset.AutoSize = $true
 $grpMode.Controls.Add($rbReset)
 
-$form.Controls.Add((New-Label "Sleep (sec) between items (only if unique)" 320 210))
+$form.Controls.Add((New-Label "Sleep (sec) between unique items" 320 210))
 $numSleep = New-Object System.Windows.Forms.NumericUpDown
 $numSleep.Location = New-Object System.Drawing.Point(320, 235)
 $numSleep.Size = New-Object System.Drawing.Size(100, 22)
@@ -158,7 +152,7 @@ $form.Controls.Add($numSleep)
 
 # Buttons
 $btnTest = New-Object System.Windows.Forms.Button
-$btnTest.Text = "Test Connection"
+$btnTest.Text = "Test Connection + Diags"
 $btnTest.Location = New-Object System.Drawing.Point(10, 280)
 $btnTest.Size = New-Object System.Drawing.Size(155, 32)
 $form.Controls.Add($btnTest)
@@ -193,7 +187,7 @@ $form.Controls.Add($lblStatus)
 # Log
 $txtLog = New-Object System.Windows.Forms.TextBox
 $txtLog.Location = New-Object System.Drawing.Point(10, 380)
-$txtLog.Size = New-Object System.Drawing.Size(945, 410)
+$txtLog.Size = New-Object System.Drawing.Size(945, 460)
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.ReadOnly = $true
@@ -232,6 +226,36 @@ $backgroundScript = {
         $logQueue.Add("[$((Get-Date).ToString('HH:mm:ss'))] $msg`r`n")
     }
 
+    function Run-Diagnostics($siteUrl) {
+        Log "--- DIAGNOSTICS START ---"
+        Log "OS: $((Get-WmiObject Win32_OperatingSystem).Caption)"
+        Log "PS Version: $($PSVersionTable.PSVersion)"
+        Log ".NET Framework: $((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release -ErrorAction SilentlyContinue).Release)"
+
+        # Security Protocol Check
+        Log "Current Security Protocol: $([System.Net.ServicePointManager]::SecurityProtocol)"
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+        Log "Ensured Security Protocol: $([System.Net.ServicePointManager]::SecurityProtocol)"
+
+        # Assembly Info
+        $loaded = [AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.FullName -match "Microsoft.SharePoint.Client" }
+        foreach ($asm in $loaded) { Log "Loaded: $($asm.FullName) from $($asm.Location)" }
+
+        # Reachability
+        try {
+            $uri = New-Object System.Uri($siteUrl)
+            Log "DNS Check: $([System.Net.Dns]::GetHostAddresses($uri.Host))"
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            $connect = $tcp.BeginConnect($uri.Host, 443, $null, $null)
+            if ($connect.AsyncWaitHandle.WaitOne(3000, $false)) {
+                $tcp.EndConnect($connect)
+                Log "TCP Port 443: Reachable"
+            } else { Log "TCP Port 443: TIMEOUT" }
+            $tcp.Close()
+        } catch { Log "Reachability Check Failed: $($_.Exception.Message)" }
+        Log "--- DIAGNOSTICS END ---"
+    }
+
     function Execute-QueryWithRetry($context) {
         $retry = $true
         $retryCount = 0
@@ -240,16 +264,19 @@ $backgroundScript = {
                 $context.ExecuteQuery()
                 $retry = $false
             } catch {
-                if ($_.Exception.Message -like "*429*" -or $_.Exception.Message -like "*503*") {
+                $msg = $_.Exception.Message
+                if ($msg -like "*429*" -or $msg -like "*503*") {
                     $retryCount++
                     Log "[WARN] Throttled (429/503). Waiting 5 seconds... (Attempt $retryCount)"
                     Start-Sleep -Seconds 5
+                } elseif ($msg -like "*IDCRL*") {
+                    Log "[ERROR] IDCRL Error: The login server did not respond. This usually indicates blocked legacy auth, wrong app password, or proxy/firewall issues."
+                    throw
                 } else { throw }
             }
         }
     }
 
-    # Runspaces do not inherit loaded assemblies.
     function Load-Assemblies-Internal {
         $searchPaths = @(
             "C:\Program Files\Common Files\Microsoft Shared\Web Server Extensions\16\ISAPI",
@@ -287,15 +314,18 @@ $backgroundScript = {
         $isDryRun = [bool]$data.IsDryRun
         $isTest   = [bool]$data.IsTest
 
+        if ($isTest) { Run-Diagnostics $siteUrl }
+        else { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 }
+
         $secure = ConvertTo-SecureString -String $pass -AsPlainText -Force
 
         if ($isTest) {
-            Log "[INFO] Testing connection to $siteUrl..."
+            Log "[INFO] Attempting ExecuteQuery to verify login..."
             $ctx = New-Object Microsoft.SharePoint.Client.ClientContext($siteUrl)
             $ctx.Credentials = New-Object Microsoft.SharePoint.Client.SharePointOnlineCredentials($user, $secure)
             $ctx.Load($ctx.Web)
             Execute-QueryWithRetry $ctx
-            Log "[SUCCESS] Connected to site: $($ctx.Web.Title)"
+            Log "[SUCCESS] Authenticated successfully as $user"
             $syncHash.Status = "Test Successful"
             return
         }
@@ -330,7 +360,7 @@ $backgroundScript = {
         Execute-QueryWithRetry $ctx
         $rootUrl = $list.RootFolder.ServerRelativeUrl.TrimEnd("/")
 
-        Log "[INFO] Enumerate items (Recursive)..."
+        Log "[INFO] Enumerating items..."
         $allItems = New-Object System.Collections.Generic.List[object]
         $position = $null
         do {
@@ -340,7 +370,6 @@ $backgroundScript = {
             $qry.ListItemCollectionPosition = $position
             $items = $list.GetItems($qry)
 
-            # Using Include syntax in a single string is standard for PowerShell CSOM property loading
             $ctx.Load($items, "Include(FileRef, FileDirRef, FileLeafRef, HasUniqueRoleAssignments, FileSystemObjectType)")
             Execute-QueryWithRetry $ctx
 
@@ -362,22 +391,15 @@ $backgroundScript = {
             $fileRef = "" + $it["FileRef"]
             $fileDir = ("" + $it["FileDirRef"]).TrimEnd("/")
             $leaf    = "" + $it["FileLeafRef"]
-            # FSObjType: 0=File, 1=Folder
             $isFolder = ($it.FileSystemObjectType -eq [Microsoft.SharePoint.Client.FileSystemObjectType]::Folder) -or ($it["FileSystemObjectType"] -eq 1)
 
             if ($leaf -eq "Forms" -or $leaf -eq "_t" -or $leaf -eq "_w") { continue }
 
             $topFolder = "(root)"
             $relPath = ""
-            if ($fileDir.Length -gt $rootUrl.Length) {
-                $relPath = $fileDir.Substring($rootUrl.Length).TrimStart("/")
-            }
-
-            if ([string]::IsNullOrWhiteSpace($relPath)) {
-                $topFolder = "(root)"
-            } else {
-                $topFolder = $relPath.Split("/")[0]
-            }
+            if ($fileDir.Length -gt $rootUrl.Length) { $relPath = $fileDir.Substring($rootUrl.Length).TrimStart("/") }
+            if ([string]::IsNullOrWhiteSpace($relPath)) { $topFolder = "(root)" }
+            else { $topFolder = $relPath.Split("/")[0] }
 
             if (-not $folderCounts.ContainsKey($topFolder)) { $folderCounts[$topFolder] = 0 }
             $folderCounts[$topFolder]++
@@ -483,6 +505,7 @@ $btnTest.Add_Click({
     if ([string]::IsNullOrWhiteSpace($txtSite.Text) -or [string]::IsNullOrWhiteSpace($txtUser.Text) -or [string]::IsNullOrWhiteSpace($txtPass.Text)) {
         [System.Windows.Forms.MessageBox]::Show("Please fill Site URL, Username, and App Password.") | Out-Null; return
     }
+    $txtLog.Clear()
     $data = @{ SiteUrl = $txtSite.Text.Trim(); Username = $txtUser.Text.Trim(); Password = $txtPass.Text; IsTest = $true }
     Start-Runspace-Logic $data
 })
