@@ -53,8 +53,8 @@ if (-not (Load-SharePointAssemblies)) {
 
 # ---------------- GUI Initialization ----------------
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "SPO Permissions Manager (CSOM) - Diagnostics Enabled"
-$form.Size = New-Object System.Drawing.Size(980, 900)
+$form.Text = "SPO Permissions Manager (CSOM) - Advanced Diagnostics"
+$form.Size = New-Object System.Drawing.Size(1100, 950)
 $form.StartPosition = "CenterScreen"
 
 $font = New-Object System.Drawing.Font("Segoe UI", 9)
@@ -91,7 +91,7 @@ $syncHash = [hashtable]::Synchronized(@{
 
 # Inputs
 $form.Controls.Add((New-Label "Site URL" 10 10))
-$txtSite = New-TextBox 10 30 945 ""
+$txtSite = New-TextBox 10 30 1065 ""
 $form.Controls.Add($txtSite)
 
 $form.Controls.Add((New-Label "Library Title" 10 60))
@@ -103,21 +103,21 @@ $txtUser = New-TextBox 270 80 330 ""
 $form.Controls.Add($txtUser)
 
 $form.Controls.Add((New-Label "App Password (MFA must be ON, and legacy auth allowed)" 610 60))
-$txtPass = New-TextBox 610 80 345 ""
+$txtPass = New-TextBox 610 80 465 ""
 $txtPass.UseSystemPasswordChar = $true
 $form.Controls.Add($txtPass)
 
 $form.Controls.Add((New-Label "Tenant Admin URL (Optional, for External Sharing check)" 10 110))
-$txtAdmin = New-TextBox 10 130 945 ""
+$txtAdmin = New-TextBox 10 130 1065 ""
 $form.Controls.Add($txtAdmin)
 
 $form.Controls.Add((New-Label "Output Folder" 10 160))
-$txtOut = New-TextBox 10 180 780 (Join-Path $PWD "SPO-Permissions-Output")
+$txtOut = New-TextBox 10 180 900 (Join-Path $PWD "SPO-Permissions-Output")
 $form.Controls.Add($txtOut)
 
 $btnBrowse = New-Object System.Windows.Forms.Button
 $btnBrowse.Text = "Browse..."
-$btnBrowse.Location = New-Object System.Drawing.Point(800, 178)
+$btnBrowse.Location = New-Object System.Drawing.Point(920, 178)
 $btnBrowse.Size = New-Object System.Drawing.Size(155, 25)
 $form.Controls.Add($btnBrowse)
 
@@ -152,27 +152,27 @@ $form.Controls.Add($numSleep)
 
 # Buttons
 $btnTest = New-Object System.Windows.Forms.Button
-$btnTest.Text = "Test Connection + Diags"
+$btnTest.Text = "Test Connection + Full Diags"
 $btnTest.Location = New-Object System.Drawing.Point(10, 280)
-$btnTest.Size = New-Object System.Drawing.Size(155, 32)
+$btnTest.Size = New-Object System.Drawing.Size(200, 32)
 $form.Controls.Add($btnTest)
 
 $btnStart = New-Object System.Windows.Forms.Button
 $btnStart.Text = "Start Process"
-$btnStart.Location = New-Object System.Drawing.Point(175, 280)
+$btnStart.Location = New-Object System.Drawing.Point(220, 280)
 $btnStart.Size = New-Object System.Drawing.Size(155, 32)
 $form.Controls.Add($btnStart)
 
 $btnCancel = New-Object System.Windows.Forms.Button
 $btnCancel.Text = "Cancel"
-$btnCancel.Location = New-Object System.Drawing.Point(10, 320)
+$btnCancel.Location = New-Object System.Drawing.Point(385, 280)
 $btnCancel.Size = New-Object System.Drawing.Size(155, 32)
 $btnCancel.Enabled = $false
 $form.Controls.Add($btnCancel)
 
 $progress = New-Object System.Windows.Forms.ProgressBar
-$progress.Location = New-Object System.Drawing.Point(175, 326)
-$progress.Size = New-Object System.Drawing.Size(780, 20)
+$progress.Location = New-Object System.Drawing.Point(550, 286)
+$progress.Size = New-Object System.Drawing.Size(525, 20)
 $progress.Minimum = 0
 $progress.Maximum = 100
 $progress.Value = 0
@@ -180,14 +180,19 @@ $form.Controls.Add($progress)
 
 $lblStatus = New-Object System.Windows.Forms.Label
 $lblStatus.Text = "Idle"
-$lblStatus.Location = New-Object System.Drawing.Point(175, 348)
-$lblStatus.Size = New-Object System.Drawing.Size(780, 20)
+$lblStatus.Location = New-Object System.Drawing.Point(550, 308)
+$lblStatus.Size = New-Object System.Drawing.Size(525, 20)
 $form.Controls.Add($lblStatus)
+
+# Checklist Label
+$lblCheck = New-Label "IF LOGIN FAILS: 1. Legacy Auth must be enabled in Tenant. 2. MFA must be ON for the user. 3. Use an App Password (not your main pass)." 10 320
+$lblCheck.ForeColor = [System.Drawing.Color]::DarkRed
+$form.Controls.Add($lblCheck)
 
 # Log
 $txtLog = New-Object System.Windows.Forms.TextBox
-$txtLog.Location = New-Object System.Drawing.Point(10, 380)
-$txtLog.Size = New-Object System.Drawing.Size(945, 460)
+$txtLog.Location = New-Object System.Drawing.Point(10, 350)
+$txtLog.Size = New-Object System.Drawing.Size(1065, 540)
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.ReadOnly = $true
@@ -230,6 +235,7 @@ $backgroundScript = {
         Log "--- DIAGNOSTICS START ---"
         Log "OS: $((Get-WmiObject Win32_OperatingSystem).Caption)"
         Log "PS Version: $($PSVersionTable.PSVersion)"
+        Log "Process Architecture: $(if ([IntPtr]::Size -eq 8) { 'x64' } else { 'x86' })"
         Log ".NET Framework: $((Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -Name Release -ErrorAction SilentlyContinue).Release)"
 
         # Security Protocol Check
@@ -241,18 +247,29 @@ $backgroundScript = {
         $loaded = [AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.FullName -match "Microsoft.SharePoint.Client" }
         foreach ($asm in $loaded) { Log "Loaded: $($asm.FullName) from $($asm.Location)" }
 
+        # IDCRL components check (msoidcli.dll is the engine)
+        $idcrldll = Join-Path $env:SystemRoot "System32\msoidcli.dll"
+        if (-not (Test-Path $idcrldll)) { $idcrldll = Join-Path $env:SystemRoot "SysWOW64\msoidcli.dll" }
+        if (Test-Path $idcrldll) {
+            $ver = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($idcrldll)
+            Log "IDCRL Engine Found: $idcrldll (Version: $($ver.FileVersion))"
+        } else { Log "WARN: IDCRL Engine (msoidcli.dll) NOT FOUND in System32 or SysWOW64." }
+
         # Reachability
-        try {
-            $uri = New-Object System.Uri($siteUrl)
-            Log "DNS Check: $([System.Net.Dns]::GetHostAddresses($uri.Host))"
-            $tcp = New-Object System.Net.Sockets.TcpClient
-            $connect = $tcp.BeginConnect($uri.Host, 443, $null, $null)
-            if ($connect.AsyncWaitHandle.WaitOne(3000, $false)) {
-                $tcp.EndConnect($connect)
-                Log "TCP Port 443: Reachable"
-            } else { Log "TCP Port 443: TIMEOUT" }
-            $tcp.Close()
-        } catch { Log "Reachability Check Failed: $($_.Exception.Message)" }
+        $hosts = @{ "SharePoint" = $siteUrl; "Login Server" = "https://login.microsoftonline.com" }
+        foreach ($h in $hosts.Keys) {
+            try {
+                $uri = New-Object System.Uri($hosts[$h])
+                Log "$h DNS Check ($($uri.Host)): $([System.Net.Dns]::GetHostAddresses($uri.Host))"
+                $tcp = New-Object System.Net.Sockets.TcpClient
+                $connect = $tcp.BeginConnect($uri.Host, 443, $null, $null)
+                if ($connect.AsyncWaitHandle.WaitOne(3000, $false)) {
+                    $tcp.EndConnect($connect)
+                    Log "$h TCP Port 443: Reachable"
+                } else { Log "$h TCP Port 443: TIMEOUT" }
+                $tcp.Close()
+            } catch { Log "$h Reachability Check Failed: $($_.Exception.Message)" }
+        }
         Log "--- DIAGNOSTICS END ---"
     }
 
@@ -270,7 +287,12 @@ $backgroundScript = {
                     Log "[WARN] Throttled (429/503). Waiting 5 seconds... (Attempt $retryCount)"
                     Start-Sleep -Seconds 5
                 } elseif ($msg -like "*IDCRL*") {
-                    Log "[ERROR] IDCRL Error: The login server did not respond. This usually indicates blocked legacy auth, wrong app password, or proxy/firewall issues."
+                    Log "[ERROR] IDCRL Error: The login server did not respond."
+                    Log "TROUBLESHOOTING CHECKLIST:"
+                    Log "1. Verify Legacy Auth is allowed in your tenant (Set-SPOTenant -LegacyAuthProtocolsEnabled `$true)."
+                    Log "2. Verify the account has MFA enabled and you are using an APP PASSWORD."
+                    Log "3. App Passwords won't work if Security Defaults are enabled (Conditional Access must be used instead)."
+                    Log "4. Ensure no Proxy is blocking login.microsoftonline.com."
                     throw
                 } else { throw }
             }
@@ -314,8 +336,10 @@ $backgroundScript = {
         $isDryRun = [bool]$data.IsDryRun
         $isTest   = [bool]$data.IsTest
 
+        # Always ensure TLS 1.2
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+
         if ($isTest) { Run-Diagnostics $siteUrl }
-        else { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 }
 
         $secure = ConvertTo-SecureString -String $pass -AsPlainText -Force
 
@@ -360,7 +384,7 @@ $backgroundScript = {
         Execute-QueryWithRetry $ctx
         $rootUrl = $list.RootFolder.ServerRelativeUrl.TrimEnd("/")
 
-        Log "[INFO] Enumerating items..."
+        Log "[INFO] Enumerate items (Recursive)..."
         $allItems = New-Object System.Collections.Generic.List[object]
         $position = $null
         do {
@@ -505,7 +529,6 @@ $btnTest.Add_Click({
     if ([string]::IsNullOrWhiteSpace($txtSite.Text) -or [string]::IsNullOrWhiteSpace($txtUser.Text) -or [string]::IsNullOrWhiteSpace($txtPass.Text)) {
         [System.Windows.Forms.MessageBox]::Show("Please fill Site URL, Username, and App Password.") | Out-Null; return
     }
-    $txtLog.Clear()
     $data = @{ SiteUrl = $txtSite.Text.Trim(); Username = $txtUser.Text.Trim(); Password = $txtPass.Text; IsTest = $true }
     Start-Runspace-Logic $data
 })
