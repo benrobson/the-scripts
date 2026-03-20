@@ -1,0 +1,6 @@
+# SharePoint Online Preflight Scanner - Python Dependencies
+# Python 3.8+
+
+PySide6==6.6.1
+msal==1.28.0
+requests==2.31.0
