@@ -994,30 +994,43 @@ class ExportManager:
         story.append(Paragraph("Detailed Findings", styles["Heading2"]))
         if flagged_items:
             detail_rows = [[
-                "Name", "Type", "Folder", "Link", "Anonymous", "External", "Signal", "Notes"
+                "Name", "Type", "Folder", "Link", "Anon", "External", "Signal", "Notes"
             ]]
             for item in flagged_items:
+                # Create style for header row
+                name_style = styles["Normal"]
+                name_style.fontSize = 8
+                
                 detail_rows.append([
-                    item.name[:36],
-                    item.item_type,
-                    item.top_level_folder[:24],
-                    ExportManager._bool_text(item.has_sharing_link),
-                    ExportManager._bool_text(item.has_anonymous_link),
-                    ExportManager._bool_text(item.has_guest_or_external),
-                    item.permission_signal,
-                    (item.notes or "")[:40],
+                    Paragraph(item.name[:32] if item.name else "", name_style),
+                    Paragraph(item.item_type, name_style),
+                    Paragraph(item.top_level_folder[:20] if item.top_level_folder else "", name_style),
+                    Paragraph(ExportManager._bool_text(item.has_sharing_link), name_style),
+                    Paragraph(ExportManager._bool_text(item.has_anonymous_link), name_style),
+                    Paragraph(ExportManager._bool_text(item.has_guest_or_external), name_style),
+                    Paragraph(item.permission_signal or "", name_style),
+                    Paragraph(item.notes or "", name_style),
                 ])
             detail_table = Table(
                 detail_rows,
-                colWidths=[38 * mm, 18 * mm, 28 * mm, 12 * mm, 18 * mm, 15 * mm, 28 * mm, 32 * mm],
+                colWidths=[28 * mm, 14 * mm, 20 * mm, 11 * mm, 11 * mm, 13 * mm, 20 * mm, 38 * mm],
                 repeatRows=1,
             )
             detail_table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EDE7F6")),
-                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#BDBDBD")),
-                ("FONTSIZE", (0, 0), (-1, -1), 7),
-                ("PADDING", (0, 0), (-1, -1), 3),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9D9D9")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                ("TOPPADDING", (0, 0), (-1, 0), 6),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5F5F5")]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 1), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
             ]))
             story.append(detail_table)
         else:
@@ -1340,8 +1353,9 @@ class ConnectionSetupDialog(QDialog):
             self.auth_manager = auth_manager
             self.graph_client = graph_client
             self.status_label.setText(f"Connected as {name}")
-            self.detail_label.setText("Authentication successful. You can now open the scanner.")
-            self.continue_button.setEnabled(True)
+            self.detail_label.setText("Authentication successful. Opening scanner...")
+            # Auto-navigate to scanner after successful authentication
+            self.accept()
         except Exception as e:
             self.auth_manager = None
             self.graph_client = None
@@ -1467,7 +1481,6 @@ class MainWindow(QMainWindow):
         progress_layout = QVBoxLayout(progress_group)
 
         cards_row = QHBoxLayout()
-        self.card_auth = InfoCard("Authentication", "Not authenticated")
         self.card_phase = InfoCard("Phase", ScanPhase.IDLE.value)
         self.card_progress = InfoCard("Progress", "0 / 0")
         self.card_flagged = InfoCard("Flagged", "0")
@@ -1475,7 +1488,6 @@ class MainWindow(QMainWindow):
         self.card_impacted = InfoCard("Affected Items", "0")
 
         for card in (
-            self.card_auth,
             self.card_phase,
             self.card_progress,
             self.card_flagged,
@@ -1592,8 +1604,7 @@ class MainWindow(QMainWindow):
                 background: white;
             }
             QPushButton {
-                min-height: 34px;
-                padding: 6px 14px;
+                padding: 4px 12px;
                 border-radius: 6px;
                 border: 1px solid #c0c0c0;
                 background: #f4f4f4;
@@ -1685,12 +1696,10 @@ class MainWindow(QMainWindow):
 
         if authenticated:
             user = self.auth_manager.username or "User"
-            self.card_auth.set_value(user)
             self.banner_user.setText(f"User: {user}")
             self.scan_button.setEnabled(True)
             self.load_libraries_button.setEnabled(True)
         else:
-            self.card_auth.set_value("Not authenticated")
             self.banner_user.setText("User: Not authenticated")
             self.scan_button.setEnabled(False)
             self.load_libraries_button.setEnabled(False)
@@ -1730,7 +1739,10 @@ class MainWindow(QMainWindow):
                 self.banner_status.setText("Status: Ready")
                 return
 
-            for lib in libraries:
+            # Sort libraries alphabetically by name
+            sorted_libraries = sorted(libraries, key=lambda lib: lib.get("name", "").lower())
+            
+            for lib in sorted_libraries:
                 name = lib.get("name", "Unnamed Library")
                 self.library_combo.addItem(name, {
                     "id": lib.get("id", ""),
@@ -1989,6 +2001,20 @@ class MainWindow(QMainWindow):
             os.startfile(folder)
         else:
             QMessageBox.warning(self, "Folder Not Found", "The output folder does not exist.")
+
+    def closeEvent(self, event):
+        reply = QMessageBox.question(
+            self,
+            "Confirm Exit",
+            "Are you sure you want to close the SharePoint Scanner?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            event.accept()
+        else:
+            event.ignore()
 
 
 def main():
