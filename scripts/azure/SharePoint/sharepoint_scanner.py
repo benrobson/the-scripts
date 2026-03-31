@@ -1079,6 +1079,7 @@ class ScanWorker(QThread):
         scan_permissions: bool,
         export_pdf: bool,
         skip_count: bool = False,
+        target_folder_id: Optional[str] = None,
     ):
         super().__init__()
         self.graph = graph_client
@@ -1091,6 +1092,7 @@ class ScanWorker(QThread):
         self.scan_permissions = scan_permissions
         self.export_pdf = export_pdf
         self.skip_count = skip_count
+        self.target_folder_id = target_folder_id
         self._cancel_requested = False
         self._scanner: Optional[LibraryScanner] = None
 
@@ -1442,8 +1444,19 @@ class MainWindow(QMainWindow):
         self.load_libraries_button = QPushButton("Load Libraries")
         self.load_libraries_button.setEnabled(False)
         self.load_libraries_button.clicked.connect(self._load_libraries)
+        self.library_combo.currentIndexChanged.connect(self._on_library_changed)
         lib_row.addWidget(self.library_combo, 1)
         lib_row.addWidget(self.load_libraries_button)
+
+        folder_row = QHBoxLayout()
+        self.folder_combo = QComboBox()
+        self.folder_combo.setMinimumWidth(280)
+        self.folder_combo.addItem("(All - root level)", None)
+        self.load_folders_button = QPushButton("Load Folders")
+        self.load_folders_button.setEnabled(False)
+        self.load_folders_button.clicked.connect(self._load_folders)
+        folder_row.addWidget(self.folder_combo, 1)
+        folder_row.addWidget(self.load_folders_button)
 
         out_row = QHBoxLayout()
         self.output_folder_input = QLineEdit(str(Path.home() / "SharePointScanResults"))
@@ -1454,6 +1467,7 @@ class MainWindow(QMainWindow):
 
         target_form.addRow("Site URL", self.site_url_input)
         target_form.addRow("Document Library", lib_row)
+        target_form.addRow("Top-level Folder", folder_row)
         target_form.addRow("Output Folder", out_row)
 
         options_group = QGroupBox("Options")
@@ -1763,6 +1777,77 @@ class MainWindow(QMainWindow):
             self.banner_status.setText("Status: Failed loading libraries")
             self.statusBar().showMessage("Failed to load libraries")
 
+    def _on_library_changed(self):
+        """Clear folders when library selection changes"""
+        self.folder_combo.clear()
+        self.folder_combo.addItem("(All - root level)", None)
+        self.load_folders_button.setEnabled(True)
+
+    def _load_folders(self):
+        """Load top-level folders from the selected library"""
+        if not self.graph_client:
+            QMessageBox.warning(self, "Not Authenticated", "Authenticate before loading folders.")
+            return
+
+        selected = self.library_combo.currentData()
+        if not selected or not selected.get("id"):
+            QMessageBox.warning(self, "Missing Library", "Select a document library first.")
+            return
+
+        try:
+            self.card_phase.set_value(ScanPhase.RESOLVING_LIBRARY.value)
+            self.banner_status.setText("Status: Loading folders")
+            self.statusBar().showMessage("Loading top-level folders...")
+
+            drive_id = selected["id"]
+            site_url = self.site_url_input.text().strip()
+            
+            # Resolve site to get site_id for proper drive access
+            site = self.graph_client.resolve_site(site_url)
+            site_id = site.get("id")
+            
+            if not site_id:
+                raise RuntimeError("Could not resolve site ID")
+            
+            # Use site-relative drive path for proper authentication context
+            url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root/children"
+            params = {
+                "$top": 1000,
+                "$select": "id,name,webUrl,folder",
+            }
+            response = self.graph_client.request("GET", url, params=params)
+            
+            items = response.get("value", [])
+            
+            # Filter to only folders
+            folders = [item for item in items if "folder" in item]
+            
+            self.folder_combo.clear()
+            self.folder_combo.addItem("(All - root level)", None)
+
+            if folders:
+                # Sort alphabetically
+                sorted_folders = sorted(folders, key=lambda f: f.get("name", "").lower())
+                for folder in sorted_folders:
+                    folder_name = folder.get("name", "Unnamed")
+                    folder_id = folder.get("id", "")
+                    self.folder_combo.addItem(folder_name, folder_id)
+                
+                logger.info(f"FOLDER | LOADED  | {len(folders)} top-level folders")
+                self.statusBar().showMessage(f"Loaded {len(folders)} top-level folders")
+            else:
+                self.statusBar().showMessage("No top-level folders found")
+
+            self.card_phase.set_value(ScanPhase.IDLE.value)
+            self.banner_status.setText("Status: Ready")
+
+        except Exception as e:
+            logger.error(f"FOLDER | FAILED  | {e}")
+            QMessageBox.critical(self, "Load Folders Failed", str(e))
+            self.card_phase.set_value(ScanPhase.ERROR.value)
+            self.banner_status.setText("Status: Failed loading folders")
+            self.statusBar().showMessage("Failed to load folders")
+
     def _start_scan(self):
         if not self.graph_client:
             QMessageBox.warning(self, "Not Authenticated", "Authenticate before starting a scan.")
@@ -1772,6 +1857,8 @@ class MainWindow(QMainWindow):
         output_folder = self.output_folder_input.text().strip()
         library_title = self.library_combo.currentText().strip()
         selected = self.library_combo.currentData()
+        folder_data = self.folder_combo.currentData()
+        folder_name = self.folder_combo.currentText().strip()
 
         if not site_url:
             QMessageBox.warning(self, "Missing Site URL", "Enter a SharePoint site URL.")
@@ -1793,6 +1880,7 @@ class MainWindow(QMainWindow):
 
         Path(output_folder).mkdir(parents=True, exist_ok=True)
         drive_id = selected["id"]
+        target_folder_id = folder_data  # None if "(All - root level)" is selected
 
         self.results_summary.clear()
         self.results_table.setRowCount(0)
@@ -1808,12 +1896,14 @@ class MainWindow(QMainWindow):
         self.card_impacted.set_value("0")
         self.banner_status.setText("Status: Scanning (fast mode)" if self.skip_count_checkbox.isChecked() else "Status: Scanning")
         self.banner_site.setText(f"Site: {site_url}")
-        self.banner_library.setText(f"Library: {library_title}")
+        self.banner_library.setText(f"Library: {library_title} / Folder: {folder_name}")
         self.progress_detail.setText("Starting scan...")
 
         self.site_url_input.setEnabled(False)
         self.library_combo.setEnabled(False)
+        self.folder_combo.setEnabled(False)
         self.load_libraries_button.setEnabled(False)
+        self.load_folders_button.setEnabled(False)
         self.output_folder_input.setEnabled(False)
         self.skip_count_checkbox.setEnabled(False)
         self.scan_button.setEnabled(False)
@@ -1830,6 +1920,7 @@ class MainWindow(QMainWindow):
             scan_permissions=self.scan_permissions_checkbox.isChecked(),
             export_pdf=self.export_pdf_checkbox.isChecked(),
             skip_count=self.skip_count_checkbox.isChecked(),
+            target_folder_id=target_folder_id,
         )
         self.scan_worker.progress.connect(self._on_progress)
         self.scan_worker.log.connect(self._append_log)
@@ -1988,7 +2079,9 @@ class MainWindow(QMainWindow):
         self.scan_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.library_combo.setEnabled(True)
+        self.folder_combo.setEnabled(True)
         self.load_libraries_button.setEnabled(True)
+        self.load_folders_button.setEnabled(True)
         self.site_url_input.setEnabled(True)
         self.output_folder_input.setEnabled(True)
         self.skip_count_checkbox.setEnabled(True)
