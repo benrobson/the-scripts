@@ -11,6 +11,8 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import Optional, Dict, List, Tuple
 from urllib.parse import urlparse
+import argparse
+import subprocess
 
 import requests
 import msal
@@ -61,6 +63,9 @@ GRAPH_SCOPES = [
     "Sites.Read.All",
     "Files.Read.All",
 ]
+
+# Application version
+APP_VERSION = "0.2.0"
 
 MAX_RETRIES = 4
 INITIAL_BACKOFF = 1.5
@@ -1260,9 +1265,10 @@ class ConnectionSetupDialog(QDialog):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        header = QLabel("Connect to Microsoft 365 before opening the preflight scanner")
+        header = QLabel(f"SharePoint Online Preflight Scanner v{APP_VERSION}")
         header.setObjectName("SetupHeader")
-        sub = QLabel("Enter the Entra app details, authenticate interactively, then continue into the scanner.")
+        sub = QLabel("Connect to Microsoft 365 before opening the scanner.\n"
+                     "Enter the Entra app details, authenticate interactively, then continue.")
         sub.setWordWrap(True)
         sub.setObjectName("SetupSubheader")
         layout.addWidget(header)
@@ -1373,7 +1379,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, initial_client_id="", initial_tenant_id="", auth_manager=None, graph_client=None):
         super().__init__()
-        self.setWindowTitle("SharePoint Online Preflight Scanner")
+        self.setWindowTitle(f"SharePoint Online Preflight Scanner - v{APP_VERSION}")
         self.resize(1320, 940)
 
         global logger
@@ -2110,7 +2116,99 @@ class MainWindow(QMainWindow):
             event.ignore()
 
 
+def build_exe():
+    """Build a standalone EXE file using PyInstaller"""
+    try:
+        import PyInstaller
+    except ImportError:
+        print("ERROR: PyInstaller is not installed.")
+        print("Install it with: pip install pyinstaller")
+        return False
+    
+    script_dir = Path(__file__).parent
+    script_file = script_dir / "sharepoint_scanner.py"
+    
+    if not script_file.exists():
+        print(f"ERROR: {script_file} not found")
+        return False
+    
+    output_dir = script_dir / "dist"
+    build_dir = script_dir / "build"
+    spec_dir = script_dir / "build_spec"
+    
+    print("=" * 70)
+    print("SharePoint Scanner - EXE Builder")
+    print("=" * 70)
+    print(f"Version: {APP_VERSION}")
+    print(f"Source script: {script_file}")
+    print(f"Output directory: {output_dir}")
+    print()
+    
+    # PyInstaller command
+    cmd = [
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--name=SharePointScanner",
+        "--onefile",
+        "--windowed",
+        f"--distpath={output_dir}",
+        f"--workpath={build_dir}",
+        f"--specpath={spec_dir}",
+        "--icon=NONE",
+        "--collect-all=PySide6",
+        "--collect-all=msal",
+        "--collect-all=reportlab",
+        "--hidden-import=requests",
+        "--hidden-import=urllib3",
+        "--hidden-import=chardet",
+        str(script_file),
+    ]
+    
+    print("Building EXE...")
+    print()
+    
+    try:
+        result = subprocess.run(cmd, check=True)
+        print()
+        print("=" * 70)
+        print("✓ EXE build completed successfully!")
+        print("=" * 70)
+        print(f"EXE location: {output_dir / 'SharePointScanner.exe'}")
+        print()
+        print("Note: You can distribute the EXE file to other users.")
+        print("Users will need to provide their own credentials to authenticate.")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        print()
+        print("=" * 70)
+        print("✗ EXE build failed!")
+        print("=" * 70)
+        print(f"Error: {e}")
+        return False
+
+
 def main():
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="SharePoint Online Preflight Scanner",
+        add_help=True
+    )
+    parser.add_argument(
+        "--build-exe",
+        action="store_true",
+        help="Build a standalone EXE file using PyInstaller"
+    )
+    
+    args = parser.parse_args()
+    
+    # Handle build-exe flag
+    if args.build_exe:
+        success = build_exe()
+        sys.exit(0 if success else 1)
+    
+    # Normal GUI mode
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
