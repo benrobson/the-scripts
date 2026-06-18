@@ -104,6 +104,25 @@ The repository is organized into the following directories:
     *   **Dependencies:** AzureAD module.
 *   [UserDistributionGroupReport.ps1](scripts/azure/Reports/UserDistributionGroupReport.ps1)
 *   [Reset-SPOFolderAndFilesPermissions.ps1](scripts/azure/SharePoint/Reset-SPOFolderAndFilesPermissions.ps1)
+    *   **Description:** This CLI script resets unique permissions on folders and files in a SharePoint document library, forcing them to inherit from their parent.
+    *   **Usage:**
+        1.  Open PowerShell.
+        2.  Run the script with the `-SiteURL` parameter:
+            ```powershell
+            .\Reset-SPOFolderAndFilesPermissions.ps1 -SiteURL "https://tenant.sharepoint.com/sites/yoursite"
+            ```
+        3.  The script will prompt for interactive login.
+    *   **Dependencies:** PnP.PowerShell module.
+*   [Reset-SPOFolderAndFilesPermissions-GUI.ps1](scripts/azure/SharePoint/Reset-SPOFolderAndFilesPermissions-GUI.ps1)
+    *   **Description:** This GUI-based tool provides a visual interface to scan SharePoint document libraries, view item counts and sizes, and reset unique permissions with a progress bar and dry-run support.
+    *   **Usage:**
+        1.  Open PowerShell as an administrator.
+        2.  Run the script in STA mode (required for WPF). You can optionally pass the `-SiteURL` to pre-populate the connection field:
+            ```powershell
+            powershell.exe -STA -File .\Reset-SPOFolderAndFilesPermissions-GUI.ps1 -SiteURL "https://tenant.sharepoint.com/sites/yoursite"
+            ```
+        3.  Connect, select a library/folder, scan, and execute the reset.
+    *   **Dependencies:** PnP.PowerShell module.
 
 ### Exchange
 
